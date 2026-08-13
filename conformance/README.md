@@ -4,6 +4,9 @@
 release consumed by this repository. Updating it is a coordinated change with
 the specification, planning record and Go implementation.
 
-This repository-bootstrap lock is not a conformance result. The build-baseline
-checkpoint must add offline `make fixtures` and `make test-conformance` targets
-before implementation evidence can be recorded.
+`make fixtures` installs and verifies the pinned artifact. `make test-fixtures`
+is offline and exercises the implemented JSON, compact-JWS, and OpenSSH
+certificate parser subset against all published base vectors and both carrier
+certificates. It does not claim full corpus conformance: `make
+test-conformance` continues to fail closed until every applicable case has a
+complete harness.

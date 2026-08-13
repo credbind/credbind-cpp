@@ -8,7 +8,7 @@
 
 namespace credbind {
 
-enum class ParseErrorKind { malformed_input, resource_limit };
+enum class ParseErrorKind { malformed_input, resource_limit, unsupported_algorithm };
 
 struct ParseError final {
     ParseErrorKind kind;

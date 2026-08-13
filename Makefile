@@ -56,9 +56,13 @@ test-unit: dependencies-check build $(TEST_BINARY)
 	$(TEST_BINARY)
 	$(PYTHON) tests/unit/version_test.py "$(BINARY)" --version "$(VERSION)" --revision "$(REVISION)" --source-date-epoch "$(SOURCE_DATE_EPOCH)" --target "$(TARGET)"
 
-$(TEST_BINARY): tests/unit/parsers_test.cpp src/base64url.cpp src/base64url.hpp src/strict_json.cpp src/strict_json.hpp src/parse_error.hpp $(THIRD_PARTY_HEADERS) Makefile
+test-fixtures: dependencies-check $(TEST_BINARY)
+	$(PYTHON) scripts/fixtures.py verify
+	$(PYTHON) tests/fixtures/parser_vectors_test.py "$(TEST_BINARY)"
+
+$(TEST_BINARY): tests/unit/parsers_test.cpp src/base64url.cpp src/base64url.hpp src/jws.cpp src/jws.hpp src/openssh_certificate.cpp src/openssh_certificate.hpp src/strict_json.cpp src/strict_json.hpp src/parse_error.hpp $(THIRD_PARTY_HEADERS) Makefile
 	@mkdir -p $(@D)
-	$(CXX) -Isrc -Ithird_party $(CXXFLAGS) tests/unit/parsers_test.cpp src/base64url.cpp src/strict_json.cpp $(LDFLAGS) -o $@
+	$(CXX) -Isrc -Ithird_party $(CXXFLAGS) tests/unit/parsers_test.cpp src/base64url.cpp src/jws.cpp src/openssh_certificate.cpp src/strict_json.cpp $(LDFLAGS) -o $@
 
 test-cli:
 	@$(MAKE) --no-print-directory _not-implemented TARGET_NAME=$@
@@ -79,7 +83,7 @@ verify-binary: build
 	@test "$(TARGET)" = "$(HOST_SYSTEM)-$(HOST_ARCH)" || { echo "verify-binary requires the host target" >&2; exit 1; }
 	$(PYTHON) scripts/verify_binary.py --binary "$(BINARY)" --target "$(TARGET)" --version "$(VERSION)" --revision "$(REVISION)" --source-date-epoch "$(SOURCE_DATE_EPOCH)"
 
-test-fixtures test-conformance test-integration test-syslog test-deadline test-openssh test-sanitize test-fuzz-smoke fuzz:
+test-conformance test-integration test-syslog test-deadline test-openssh test-sanitize test-fuzz-smoke fuzz:
 	@$(MAKE) --no-print-directory _not-implemented TARGET_NAME=$@
 
 _not-implemented:

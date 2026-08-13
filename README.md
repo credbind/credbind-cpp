@@ -43,9 +43,15 @@ The current schema-specific handler covers the closed CredBind core envelope.
 It rejects duplicate and unknown members, wrong types, invalid UTF-8, trailing
 data, invalid numeric syntax and configured byte, depth, member, value and key
 bounds. The independent Base64url decoder rejects padding, whitespace,
-non-alphabet characters, impossible lengths and non-zero unused pad bits. This
-checkpoint does not claim complete token, certificate, JWS or verifier
-conformance.
+non-alphabet characters, impossible lengths and non-zero unused pad bits.
+
+Compact-JWS parsing preserves the exact three non-empty canonical Base64url
+segments. The bounded OpenSSH reader covers the admitted P-256 and Ed25519
+certificate layouts, exact SSH lengths, user/finite validity, one principal,
+the double-wrapped carrier tuple, the closed sorted permission-extension set,
+prohibited critical options, matching CA/signature families, truncation and
+trailing data. This checkpoint does not claim cryptographic or complete
+verifier conformance.
 
 ## Conformance input
 
@@ -53,8 +59,8 @@ conformance.
 An offline reproduction may set `CREDBIND_FIXTURE_SOURCE` to an existing asset;
 its SHA-256 must still match.
 
-All unfinished protocol, fixture, integration, syslog, deadline, sanitizer,
-fuzz and OpenSSH targets fail explicitly. In particular,
+All unfinished protocol-conformance, integration, syslog, deadline, sanitizer,
+fuzz and real-OpenSSH targets fail explicitly. In particular,
 `make test-conformance` cannot report success until the independent verifier
 actually passes the shared corpus. This baseline makes no conformance,
 security, packaging or platform-support claim.
