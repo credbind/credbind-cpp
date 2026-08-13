@@ -1,0 +1,14 @@
+{
+  "format_version": 1,
+  "release": "v1.0.0-rc.1",
+  "specification_revision": "e5474946e6744bed607aa27fdeef0712d73d2ad1",
+  "artifact": {
+    "name": "credbind-ssh-v1-conformance-v1.0.0-rc.1.tar.gz",
+    "url": "https://github.com/credbind/spec/releases/download/v1.0.0-rc.1/credbind-ssh-v1-conformance-v1.0.0-rc.1.tar.gz",
+    "sha256": "c987f70a8d38b9bc30cc217643cf1cdeaebaf5365e9453e4953060989729e4de"
+  },
+  "manifest": {
+    "path": "credbind-ssh-v1-conformance-v1.0.0-rc.1/MANIFEST.json",
+    "sha256": "52a9bdc6df08484281925f218acffebcb2f9b3ebcdc2ef33df56b301b95cb97e"
+  }
+}
