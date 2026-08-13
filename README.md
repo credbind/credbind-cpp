@@ -17,8 +17,8 @@ metadata:
 
 ```sh
 make build
-make test
-make check
+make test-unit
+make dependencies-check
 make verify-binary
 ```
 
@@ -26,6 +26,26 @@ At this checkpoint the command implements only deterministic
 `version`/`--version` output. Every other invocation fails nonzero and writes no
 stdout. `verify-binary` checks the native binary type and PIE status, rejects
 checkout-path leakage and compares two controlled builds byte for byte.
+
+The aggregate `make test` and `make check` targets intentionally fail until
+all deterministic layers they promise are implemented. Required unfinished
+targets never skip or report success.
+
+## Strict parser checkpoint
+
+The internal C++17 parser layer uses pinned `nlohmann/json` v3.12.0 through its
+SAX interface and pinned `tl::expected` v1.3.1 for value-or-error results. The
+committed headers and licenses are verified byte-for-byte by
+`make dependencies-check`; exact sources, commits, hashes, licenses and linkage
+are recorded in `third_party/dependencies.json`.
+
+The current schema-specific handler covers the closed CredBind core envelope.
+It rejects duplicate and unknown members, wrong types, invalid UTF-8, trailing
+data, invalid numeric syntax and configured byte, depth, member, value and key
+bounds. The independent Base64url decoder rejects padding, whitespace,
+non-alphabet characters, impossible lengths and non-zero unused pad bits. This
+checkpoint does not claim complete token, certificate, JWS or verifier
+conformance.
 
 ## Conformance input
 

@@ -1,0 +1,35 @@
+{
+  "dependencies": [
+    {
+      "commit": "55f93686c01528224f448c19128836e7df245f72",
+      "commit_signature_verified": true,
+      "header": "third_party/nlohmann/json.hpp",
+      "header_sha256": "aaf127c04cb31c406e5b04a63f1ae89369fccde6d8fa7cdda1ed4f32dfc5de63",
+      "license": "MIT",
+      "license_file": "third_party/licenses/nlohmann-json-LICENSE.MIT",
+      "license_sha256": "46a65cffd1ea955132d95a8dd921640714a8d6b537d2e4e482d31145ae95b603",
+      "linkage": "header-only, private",
+      "name": "nlohmann/json",
+      "release_published": "2025-04-11T08:43:39Z",
+      "repository": "https://github.com/nlohmann/json",
+      "source": "https://github.com/nlohmann/json/releases/download/v3.12.0/json.hpp",
+      "version": "v3.12.0"
+    },
+    {
+      "commit": "1770e3559f2f6ea4a5fb4f577ad22aeb30fbd8e4",
+      "commit_signature_verified": false,
+      "header": "third_party/tl/expected.hpp",
+      "header_sha256": "0788f7d544a2fdec1dd7a794e1e9863ad4cc6a8817982b6fd93fd98724b9fa19",
+      "license": "CC0-1.0",
+      "license_file": "third_party/licenses/tl-expected-COPYING",
+      "license_sha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+      "linkage": "header-only, private",
+      "name": "tl::expected",
+      "release_published": "2025-09-01T09:44:47Z",
+      "repository": "https://github.com/TartanLlama/expected",
+      "source": "https://raw.githubusercontent.com/TartanLlama/expected/v1.3.1/include/tl/expected.hpp",
+      "version": "v1.3.1"
+    }
+  ],
+  "policy": "Review upstream security and maintenance status before every pin change; verify all committed byte hashes in make check."
+}
