@@ -50,8 +50,20 @@ segments. The bounded OpenSSH reader covers the admitted P-256 and Ed25519
 certificate layouts, exact SSH lengths, user/finite validity, one principal,
 the double-wrapped carrier tuple, the closed sorted permission-extension set,
 prohibited critical options, matching CA/signature families, truncation and
-trailing data. This checkpoint does not claim cryptographic or complete
-verifier conformance.
+trailing data.
+
+## Cryptographic checkpoint
+
+The independent cryptographic layer verifies the pinned standard RS256 issuer
+signature and the exact eight-round `gq-rs256-v1` proof profile. GQ parsing is
+bounded and rejects non-canonical integers, altered transcript inputs, reordered
+commitments, substituted responses, ineligible RSA keys, truncation and trailing
+data. The implementation uses OpenSSL EVP for RS256 and OpenSSL BIGNUM for GQ;
+tests verify dynamic system `libcrypto` 3 linkage and reject `libssl` linkage.
+
+This layer is exercised directly against the immutable corpus. It is not yet
+wired through policy, the offline JWKS source or the production command, and it
+does not claim the maximum-size carrier, complete verifier or conformance gates.
 
 ## Conformance input
 
@@ -59,8 +71,8 @@ verifier conformance.
 An offline reproduction may set `CREDBIND_FIXTURE_SOURCE` to an existing asset;
 its SHA-256 must still match.
 
-All unfinished protocol-conformance, integration, syslog, deadline, sanitizer,
-fuzz and real-OpenSSH targets fail explicitly. In particular,
+All unfinished protocol-conformance, integration, syslog, deadline, sanitizer
+Make targets, fuzz and real-OpenSSH targets fail explicitly. In particular,
 `make test-conformance` cannot report success until the independent verifier
 actually passes the shared corpus. This baseline makes no conformance,
 security, packaging or platform-support claim.

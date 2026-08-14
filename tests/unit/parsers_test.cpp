@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "base64url.hpp"
+#include "crypto.hpp"
 #include "jws.hpp"
 #include "openssh_certificate.hpp"
 #include "parse_error.hpp"
@@ -244,6 +245,88 @@ void test_openssh_certificate() {
         credbind::ParseErrorKind::resource_limit, "OpenSSH certificate byte bound");
 }
 
+class CryptoFrameReader final {
+  public:
+    explicit CryptoFrameReader(std::string_view input) : input_(input) {}
+
+    bool byte(char& value) {
+        if (offset_ == input_.size()) return false;
+        value = input_[offset_++];
+        return true;
+    }
+
+    bool field(std::string_view& value) {
+        if (input_.size() - offset_ < 4U) return false;
+        std::uint32_t size = 0U;
+        for (std::size_t index = 0U; index < 4U; ++index) {
+            size = static_cast<std::uint32_t>(
+                (size << 8U) | static_cast<unsigned char>(input_[offset_ + index]));
+        }
+        offset_ += 4U;
+        if (static_cast<std::size_t>(size) > input_.size() - offset_) return false;
+        value = input_.substr(offset_, static_cast<std::size_t>(size));
+        offset_ += static_cast<std::size_t>(size);
+        return true;
+    }
+
+    [[nodiscard]] bool empty() const { return offset_ == input_.size(); }
+
+  private:
+    std::string_view input_;
+    std::size_t offset_ = 0U;
+};
+
+std::vector<std::uint8_t> octets(std::string_view value) {
+    std::vector<std::uint8_t> result;
+    result.reserve(value.size());
+    for (const char character : value) {
+        result.push_back(static_cast<std::uint8_t>(static_cast<unsigned char>(character)));
+    }
+    return result;
+}
+
+void verify_crypto_frame(const std::string& frame) {
+    CryptoFrameReader reader(frame);
+    char mode = '\0';
+    require(reader.byte(mode), "invalid cryptographic test frame");
+    const bool expect_success = mode == 'S' || mode == 'G';
+    require(expect_success || mode == 's' || mode == 'g', "unknown cryptographic test mode");
+    const auto expected_error = mode == 's' ? credbind::ParseErrorKind::issuer_signature_invalid
+                                             : credbind::ParseErrorKind::evidence_invalid;
+
+    std::vector<std::string_view> fields;
+    const std::size_t field_count = mode == 'S' || mode == 's' ? 4U : 6U;
+    for (std::size_t index = 0U; index < field_count; ++index) {
+        std::string_view field;
+        require(reader.field(field), "truncated cryptographic test frame");
+        fields.push_back(field);
+    }
+    require(reader.empty() && fields.back().size() == 4U,
+            "invalid cryptographic test frame fields");
+    std::uint32_t exponent = 0U;
+    for (const char character : fields.back()) {
+        exponent = static_cast<std::uint32_t>(
+            (exponent << 8U) | static_cast<unsigned char>(character));
+    }
+
+    credbind::crypto::VerificationResult result;
+    if (mode == 'S' || mode == 's') {
+        result = credbind::crypto::verify_rs256(
+            fields[0], octets(fields[1]),
+            credbind::crypto::RsaPublicKey{octets(fields[2]), exponent});
+    } else {
+        result = credbind::crypto::verify_gq_rs256(
+            fields[0], fields[1], fields[2], octets(fields[3]),
+            credbind::crypto::RsaPublicKey{octets(fields[4]), exponent});
+    }
+    require(static_cast<bool>(result) == expect_success,
+            "cryptographic fixture had unexpected result");
+    if (!expect_success) {
+        require(result.error().kind == expected_error,
+                "cryptographic fixture had unexpected error category");
+    }
+}
+
 void test_core_envelope() {
     const std::string valid =
         R"({"payload":"AA","signatures":[{"protected":"AA","signature":"AA"}],"credbind_evidence":"AA"})";
@@ -304,6 +387,12 @@ int main(int argc, char** argv) {
         require(input.good() || input.eof(), "could not read pinned certificate file");
         require(static_cast<bool>(credbind::openssh::parse_certificate(blob)),
                 "pinned OpenSSH certificate did not parse");
+    } else if (argc == 3 && std::string_view(argv[1]) == "--crypto-file") {
+        std::ifstream input(argv[2], std::ios::binary);
+        const std::string frame{std::istreambuf_iterator<char>(input),
+                                std::istreambuf_iterator<char>()};
+        require(input.good() || input.eof(), "could not read cryptographic fixture file");
+        verify_crypto_frame(frame);
     } else {
         require(argc == 1, "usage: parsers_test [core-token | parser mode]");
     }

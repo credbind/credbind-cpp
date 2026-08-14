@@ -25,7 +25,25 @@ def main() -> None:
 			actual = sha256(path)
 			if actual != dependency[digest_key]:
 				raise SystemExit(f"{path.relative_to(ROOT)}: SHA-256 {actual}, want {dependency[digest_key]}")
-	print(json.dumps({"dependencies": [entry["name"] for entry in value["dependencies"]], "status": "verified"}, sort_keys=True))
+	system = value.get("system_dependencies", [])
+	if len(system) != 1:
+		raise SystemExit("exactly one system cryptographic dependency is required")
+	for dependency in system:
+		if (
+			dependency.get("name") != "OpenSSL libcrypto"
+			or dependency.get("minimum_version") != "3.0.0"
+			or dependency.get("api_baseline") != "OpenSSL 3.0"
+			or dependency.get("linkage") != "dynamic system libcrypto only"
+			or dependency.get("pkg_config") != "libcrypto"
+			or dependency.get("prohibited_linkage")
+			!= ["libssl", "static libcrypto", "bundled libcrypto"]
+		):
+			raise SystemExit("unexpected system cryptographic dependency policy")
+	print(json.dumps({
+		"dependencies": [entry["name"] for entry in value["dependencies"]],
+		"system_dependencies": [entry["name"] for entry in system],
+		"status": "verified",
+	}, sort_keys=True))
 
 
 if __name__ == "__main__":
