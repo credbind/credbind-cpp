@@ -80,6 +80,23 @@ This checkpoint validates the offline file/key trust boundary independently.
 The issuer policy schema, complete token verifier, `config check`, and
 production command integration remain unfinished.
 
+## Issuer evidence-policy checkpoint
+
+The typed issuer verifier now receives one already-selected trusted policy,
+loads no trust from token content, resolves the exact `kid` from the offline
+JWKS snapshot, and dispatches only the explicitly admitted standard or GQ
+profile. Its bounded SAX boundary rejects duplicate issuer JSON members and
+token-supplied key references or critical parameters. Complete evidence success
+enforces exact issuer, audience/authorized-party policy, all three binding
+profiles, typed required-claim predicates, reconstructibility policy, `iat`,
+optional `nbf`, `exp`, clock skew and optional maximum credential age.
+
+The result contains only admitted claims, the authenticated issuer/key ID,
+binding, earliest credential-validity boundary and independently computed exact
+evidence-result digest. This is still an internal direct issuer-evidence layer:
+the CIC/caller signature, complete server configuration, account policy, SSH
+carrier authorization and production command remain unfinished.
+
 ## Conformance input
 
 `make fixtures` fetches and verifies the exact locked artifact and manifest.

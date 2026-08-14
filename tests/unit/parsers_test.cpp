@@ -2,12 +2,15 @@
 
 #include "base64url.hpp"
 #include "crypto.hpp"
+#include "issuer_verifier.hpp"
 #include "jwks.hpp"
 #include "jws.hpp"
 #include "openssh_certificate.hpp"
 #include "parse_error.hpp"
 #include "strict_json.hpp"
 
+#include <algorithm>
+#include <charconv>
 #include <cstdint>
 #include <cstdlib>
 #include <fstream>
@@ -16,6 +19,8 @@
 #include <limits>
 #include <string>
 #include <string_view>
+#include <system_error>
+#include <unordered_set>
 #include <unistd.h>
 #include <utility>
 #include <vector>
@@ -362,6 +367,112 @@ void verify_jwks_file(std::string_view path, std::string_view kid,
     expect_error(key, expected, "static JWKS key resolution rejection");
 }
 
+credbind::ParseErrorKind issuer_expected_error(char mode) {
+    switch (mode) {
+        case 'M': return credbind::ParseErrorKind::malformed_input;
+        case 'R': return credbind::ParseErrorKind::unsupported_profile;
+        case 'A': return credbind::ParseErrorKind::unsupported_algorithm;
+        case 'U': return credbind::ParseErrorKind::issuer_untrusted;
+        case 'S': return credbind::ParseErrorKind::issuer_signature_invalid;
+        case 'E': return credbind::ParseErrorKind::evidence_invalid;
+        case 'B': return credbind::ParseErrorKind::binding_invalid;
+        case 'C': return credbind::ParseErrorKind::issuer_claims_invalid;
+        case 'N': return credbind::ParseErrorKind::credential_not_yet_valid;
+        case 'X': return credbind::ParseErrorKind::credential_expired;
+        default: return credbind::ParseErrorKind::malformed_input;
+    }
+}
+
+void verify_issuer_frame(const std::string& frame) {
+    CryptoFrameReader reader(frame);
+    char mode = '\0';
+    require(reader.byte(mode), "invalid issuer-verifier test frame");
+    require(mode == 'P' || mode == 'M' || mode == 'R' || mode == 'A' || mode == 'U' ||
+                mode == 'S' || mode == 'E' || mode == 'B' || mode == 'C' || mode == 'N' ||
+                mode == 'X',
+            "unknown issuer-verifier test mode");
+    std::vector<std::string_view> fields;
+    for (std::size_t index = 0U; index < 13U; ++index) {
+        std::string_view field;
+        require(reader.field(field), "truncated issuer-verifier test frame");
+        fields.push_back(field);
+    }
+    require(reader.empty(), "trailing issuer-verifier test frame");
+    std::int64_t verification_time = 0;
+    const auto parsed_time = std::from_chars(fields[9].data(), fields[9].data() + fields[9].size(),
+                                             verification_time);
+    require(parsed_time.ec == std::errc{} && parsed_time.ptr == fields[9].data() + fields[9].size(),
+            "invalid issuer-verifier test time");
+
+    const auto loaded = credbind::jwks::load_static_file(
+        fields[6], credbind::jwks::FilePolicy{static_cast<std::uint32_t>(::geteuid())});
+    require(static_cast<bool>(loaded), "issuer-verifier fixture JWKS was rejected");
+    credbind::issuer::Policy policy{
+        std::string(fields[5]), {std::string(fields[7])},
+        fields[8].empty() ? std::unordered_set<std::string>{}
+                          : std::unordered_set<std::string>{std::string(fields[8])},
+        {"RS256"}, {std::string(fields[0])}, {std::string(fields[1])}, false, 0, 30,
+        {}, {"sub", "email", "iat"}};
+    const std::string scenario(fields[10]);
+    if (scenario == "wrong-audience") {
+        policy.audiences = {"wrong-audience"};
+    } else if (scenario == "wrong-authorized-party") {
+        policy.authorized_parties = {"wrong-authorized-party"};
+    } else if (scenario == "wrong-issuer") {
+        policy.issuer = "https://other-issuer.example.test";
+    } else if (scenario == "required-claim-wrong") {
+        policy.required_claims.push_back(credbind::issuer::Predicate{
+            "email", credbind::issuer::PredicateOperation::string_equals,
+            "wrong@example.test", {}});
+    } else if (scenario == "required-one-of-pass") {
+        policy.required_claims.push_back(credbind::issuer::Predicate{
+            "sub", credbind::issuer::PredicateOperation::string_one_of, "",
+            {"fixture-subject-v1-rc1", "other"}});
+    } else if (scenario == "required-array-contains-wrong") {
+        policy.required_claims.push_back(credbind::issuer::Predicate{
+            "aud", credbind::issuer::PredicateOperation::string_array_contains,
+            "missing", {}});
+    } else if (scenario == "non-reconstructible") {
+        policy.require_non_reconstructible_evidence = true;
+    } else if (scenario == "disallowed-binding") {
+        policy.binding_profiles = {credbind::issuer::kAudienceBinding};
+    } else if (scenario == "maximum-age") {
+        policy.maximum_credential_age_seconds = 100;
+    } else {
+        require(scenario.empty(), "unknown issuer-verifier policy scenario");
+    }
+
+    const auto result = credbind::issuer::verify(
+        credbind::issuer::VerificationInput{
+            std::string(fields[0]), std::string(fields[1]), std::string(fields[2]),
+            std::string(fields[3]), octets(fields[4]), verification_time},
+        policy, *loaded);
+    if (mode == 'P') {
+        require(result && result->issuer == policy.issuer && !result->issuer_key_id.empty() &&
+                    result->binding_profile == fields[1] && result->claims.size() == 3U &&
+                    result->claims.at("sub") == "fixture-subject-v1-rc1" &&
+                    result->claims.at("iat").is_number_integer() &&
+                    result->credential_valid_until_unix > verification_time &&
+                    fields[11].size() == result->verified_evidence_digest.size() &&
+                    std::equal(result->verified_evidence_digest.begin(),
+                               result->verified_evidence_digest.end(), fields[11].begin(),
+                               [](std::uint8_t left, char right) {
+                                   return left == static_cast<std::uint8_t>(
+                                                      static_cast<unsigned char>(right));
+                               }),
+                "issuer-verifier fixture did not produce a complete result");
+        std::int64_t expected_valid_until = 0;
+        const auto parsed_valid_until = std::from_chars(
+            fields[12].data(), fields[12].data() + fields[12].size(), expected_valid_until);
+        require(parsed_valid_until.ec == std::errc{} &&
+                    parsed_valid_until.ptr == fields[12].data() + fields[12].size() &&
+                    result->credential_valid_until_unix == expected_valid_until,
+                "issuer-verifier credential validity boundary mismatch");
+        return;
+    }
+    expect_error(result, issuer_expected_error(mode), "issuer-verifier rejection");
+}
+
 void test_core_envelope() {
     const std::string valid =
         R"({"payload":"AA","signatures":[{"protected":"AA","signature":"AA"}],"credbind_evidence":"AA"})";
@@ -437,6 +548,12 @@ int main(int argc, char** argv) {
         const auto expected = expectation == "limit" ? credbind::ParseErrorKind::resource_limit
                                                        : credbind::ParseErrorKind::issuer_untrusted;
         verify_jwks_file(argv[3], argv[4], expected, expect_success);
+    } else if (argc == 3 && std::string_view(argv[1]) == "--issuer-file") {
+        std::ifstream input(argv[2], std::ios::binary);
+        const std::string frame{std::istreambuf_iterator<char>(input),
+                                std::istreambuf_iterator<char>()};
+        require(input.good() || input.eof(), "could not read issuer-verifier fixture file");
+        verify_issuer_frame(frame);
     } else {
         require(argc == 1, "usage: parsers_test [core-token | parser mode]");
     }

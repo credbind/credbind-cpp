@@ -17,6 +17,13 @@ file boundary and covers symlink, non-regular-file, group-write,
 duplicate-key-ID, private-member, duplicate-member, invalid-UTF-8,
 unsupported-role/algorithm/key, unknown-key-ID and trailing-data denials.
 
+Issuer-evidence integration covers the five published base vectors across both
+evidence profiles and all three bindings, exact evidence-result digests and
+credential-validity boundaries. Negative cases cover policy pairing,
+reconstructibility, issuer/audience/authorized-party/binding/required-claim/time
+failures, protected-header trust restrictions, duplicate claims, standard
+signature substitution and GQ transcript substitution.
+
 This does not claim full corpus conformance: complete issuer policy and the
 production command are not connected yet, and `make test-conformance` continues
 to fail closed until every applicable case has a complete harness.

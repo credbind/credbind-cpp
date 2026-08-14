@@ -64,9 +64,9 @@ test-fixtures: dependencies-check crypto-check $(TEST_BINARY)
 	$(PYTHON) scripts/fixtures.py verify
 	$(PYTHON) tests/fixtures/parser_vectors_test.py "$(TEST_BINARY)"
 
-$(TEST_BINARY): tests/unit/parsers_test.cpp src/base64url.cpp src/base64url.hpp src/crypto.cpp src/crypto.hpp src/jwks.cpp src/jwks.hpp src/jws.cpp src/jws.hpp src/openssh_certificate.cpp src/openssh_certificate.hpp src/strict_json.cpp src/strict_json.hpp src/parse_error.hpp $(THIRD_PARTY_HEADERS) Makefile
+$(TEST_BINARY): tests/unit/parsers_test.cpp src/base64url.cpp src/base64url.hpp src/crypto.cpp src/crypto.hpp src/issuer_verifier.cpp src/issuer_verifier.hpp src/jwks.cpp src/jwks.hpp src/jws.cpp src/jws.hpp src/openssh_certificate.cpp src/openssh_certificate.hpp src/strict_json.cpp src/strict_json.hpp src/parse_error.hpp $(THIRD_PARTY_HEADERS) Makefile
 	@mkdir -p $(@D)
-	$(CXX) -Isrc -Ithird_party $(LIBCRYPTO_CFLAGS) $(CXXFLAGS) tests/unit/parsers_test.cpp src/base64url.cpp src/crypto.cpp src/jwks.cpp src/jws.cpp src/openssh_certificate.cpp src/strict_json.cpp $(LDFLAGS) $(LIBCRYPTO_LIBS) -o $@
+	$(CXX) -Isrc -Ithird_party $(LIBCRYPTO_CFLAGS) $(CXXFLAGS) tests/unit/parsers_test.cpp src/base64url.cpp src/crypto.cpp src/issuer_verifier.cpp src/jwks.cpp src/jws.cpp src/openssh_certificate.cpp src/strict_json.cpp $(LDFLAGS) $(LIBCRYPTO_LIBS) -o $@
 
 test-cli:
 	@$(MAKE) --no-print-directory _not-implemented TARGET_NAME=$@

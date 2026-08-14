@@ -276,6 +276,11 @@ VerificationResult verify_rs256(std::string_view signing_input,
     return {};
 }
 
+tl::expected<Sha256Digest, ParseError> digest_sha256(const std::uint8_t* data,
+                                                     std::size_t size) {
+    return sha256(data, size);
+}
+
 VerificationResult verify_gq_rs256(
     std::string_view encoded_payload, std::string_view encoded_commitment,
     std::string_view authenticated_issuer, const std::vector<std::uint8_t>& evidence,

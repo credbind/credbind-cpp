@@ -15,7 +15,11 @@ enum class ParseErrorKind {
     unsupported_algorithm,
     issuer_untrusted,
     issuer_signature_invalid,
-    evidence_invalid
+    evidence_invalid,
+    binding_invalid,
+    issuer_claims_invalid,
+    credential_not_yet_valid,
+    credential_expired
 };
 
 struct ParseError final {

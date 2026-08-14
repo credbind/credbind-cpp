@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import json
 import os
 import struct
@@ -57,6 +58,88 @@ def run_crypto(binary: Path, directory: Path, name: str, frame: bytes) -> None:
 
 def run_jwks(binary: Path, expectation: str, path: Path, kid: str) -> None:
     invoke(binary, "--jwks-file", expectation, str(path), kid)
+
+
+def encode_b64url(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
+
+
+def standard_evidence(header: str, signature: str) -> bytes:
+    return struct.pack(">Q", len(header)) + header.encode("ascii") + struct.pack(
+        ">Q", len(signature)
+    ) + signature.encode("ascii")
+
+
+def split_standard_evidence(evidence: bytes) -> tuple[str, str]:
+    header_length = int.from_bytes(evidence[:8], "big")
+    header_offset = 8
+    signature_length_offset = header_offset + header_length
+    signature_length = int.from_bytes(
+        evidence[signature_length_offset : signature_length_offset + 8], "big"
+    )
+    signature_offset = signature_length_offset + 8
+    if signature_offset + signature_length != len(evidence):
+        raise RuntimeError("invalid pinned standard evidence framing")
+    return (
+        evidence[header_offset:signature_length_offset].decode("ascii"),
+        evidence[signature_offset:].decode("ascii"),
+    )
+
+
+def run_issuer(
+    binary: Path,
+    directory: Path,
+    name: str,
+    mode: bytes,
+    vector: dict,
+    jwks_path: Path,
+    *,
+    commitment: str | None = None,
+    payload: str | None = None,
+    evidence: bytes | None = None,
+    issuer: str | None = None,
+    audience: str | None = None,
+    authorized_party: str | None = None,
+    verification_time: int | None = None,
+    scenario: str = "",
+) -> None:
+    token = json.loads(vector["token"])
+    claims = vector["issuer_claims"]
+    claim_audience = claims["aud"]
+    if isinstance(claim_audience, list):
+        claim_audience = claim_audience[0]
+    selected_commitment = commitment or vector["expected_commitment"]
+    selected_payload = payload or token["payload"]
+    selected_evidence = evidence if evidence is not None else b64url(token["credbind_evidence"])
+    digest_input = b"CredBind-Issuer-Evidence-Digest-v1\x00"
+    for value in (
+        vector["evidence_profile"].encode("ascii"),
+        selected_payload.encode("ascii"),
+        selected_evidence,
+    ):
+        digest_input += struct.pack(">Q", len(value)) + value
+    expected_digest = hashlib.sha256(digest_input).digest()
+    frame = crypto_frame(
+        mode,
+        vector["evidence_profile"].encode("ascii"),
+        vector["binding_profile"].encode("ascii"),
+        selected_commitment.encode("ascii"),
+        selected_payload.encode("ascii"),
+        selected_evidence,
+        (issuer or vector["authenticated_issuer"]).encode("utf-8"),
+        str(jwks_path).encode("utf-8"),
+        (audience or claim_audience).encode("utf-8"),
+        (authorized_party if authorized_party is not None else claims.get("azp", "")).encode(
+            "utf-8"
+        ),
+        str(verification_time or vector["verification_time"]).encode("ascii"),
+        scenario.encode("ascii"),
+        expected_digest,
+        str(claims["exp"]).encode("ascii"),
+    )
+    path = directory / f"issuer-{name}.frame"
+    path.write_bytes(frame)
+    invoke(binary, "--issuer-file", str(path))
 
 
 def main() -> None:
@@ -154,6 +237,142 @@ def main() -> None:
         invalid_utf8.write_bytes(issuer_jwks_path.read_bytes().replace(b"RS256", b"RS\xff56"))
         run_jwks(args.binary, "untrusted", invalid_utf8, issuer_key["kid"])
         run_jwks(args.binary, "untrusted", issuer_jwks_path, "missing-key-id")
+
+        issuer_vectors = {
+            name: load(corpus / "vectors" / f"{name}.json")
+            for name in (
+                "standard-p256",
+                "standard-ed25519",
+                "workload-audience-p256",
+                "workload-claim-p256",
+                "gq-p256",
+            )
+        }
+        for name, vector in issuer_vectors.items():
+            run_issuer(args.binary, temporary, f"{name}-pass", b"P", vector, issuer_jwks_path)
+        run_issuer(
+            args.binary,
+            temporary,
+            "required-one-of-pass",
+            b"P",
+            issuer_vectors["standard-p256"],
+            issuer_jwks_path,
+            scenario="required-one-of-pass",
+        )
+
+        policy_vector = issuer_vectors["standard-p256"]
+        policy_claims = policy_vector["issuer_claims"]
+        run_issuer(
+            args.binary, temporary, "binding-mismatch", b"B", policy_vector, issuer_jwks_path,
+            commitment="_" * 42 + "8",
+        )
+        run_issuer(
+            args.binary, temporary, "audience-mismatch", b"C", policy_vector, issuer_jwks_path,
+            scenario="wrong-audience",
+        )
+        run_issuer(
+            args.binary, temporary, "authorized-party-mismatch", b"C", policy_vector,
+            issuer_jwks_path, scenario="wrong-authorized-party",
+        )
+        run_issuer(
+            args.binary, temporary, "issuer-mismatch", b"C", policy_vector, issuer_jwks_path,
+            scenario="wrong-issuer",
+        )
+        run_issuer(
+            args.binary, temporary, "not-yet-valid", b"N", policy_vector, issuer_jwks_path,
+            verification_time=policy_claims["iat"] - 31,
+        )
+        run_issuer(
+            args.binary, temporary, "expired", b"X", policy_vector, issuer_jwks_path,
+            verification_time=policy_claims["exp"] + 30,
+        )
+        run_issuer(
+            args.binary, temporary, "maximum-age", b"X", policy_vector, issuer_jwks_path,
+            scenario="maximum-age",
+        )
+        run_issuer(
+            args.binary, temporary, "required-claim", b"C", policy_vector, issuer_jwks_path,
+            scenario="required-claim-wrong",
+        )
+        run_issuer(
+            args.binary, temporary, "required-array", b"C", policy_vector, issuer_jwks_path,
+            scenario="required-array-contains-wrong",
+        )
+        run_issuer(
+            args.binary, temporary, "non-reconstructible", b"R", policy_vector,
+            issuer_jwks_path, scenario="non-reconstructible",
+        )
+        run_issuer(
+            args.binary, temporary, "disallowed-binding", b"R", policy_vector,
+            issuer_jwks_path, scenario="disallowed-binding",
+        )
+
+        standard_token = json.loads(policy_vector["token"])
+        original_evidence = b64url(standard_token["credbind_evidence"])
+        original_header, original_signature = split_standard_evidence(original_evidence)
+        bad_signature_text = ("A" if original_signature[0] != "A" else "B") + original_signature[1:]
+        run_issuer(
+            args.binary, temporary, "signature-substitution", b"S", policy_vector,
+            issuer_jwks_path, evidence=standard_evidence(original_header, bad_signature_text),
+        )
+
+        header_object = json.loads(b64url(original_header))
+        for name, mode, mutation in (
+            ("unknown-kid", b"U", {"kid": "missing-key-id"}),
+            ("remote-key-reference", b"U", {"jku": "https://attacker.example/jwks"}),
+            ("critical-header", b"R", {"crit": ["unknown"]}),
+            ("algorithm-substitution", b"A", {"alg": "PS256"}),
+        ):
+            changed = dict(header_object)
+            changed.update(mutation)
+            encoded = encode_b64url(json.dumps(changed, separators=(",", ":")).encode("utf-8"))
+            run_issuer(
+                args.binary, temporary, name, mode, policy_vector, issuer_jwks_path,
+                evidence=standard_evidence(encoded, original_signature),
+            )
+        header_with_structured_empty_member = dict(header_object)
+        header_with_structured_empty_member[""] = {"nested": [None, True, 3]}
+        encoded_structured_header = encode_b64url(
+            json.dumps(
+                header_with_structured_empty_member, separators=(",", ":")
+            ).encode("utf-8")
+        )
+        run_issuer(
+            args.binary, temporary, "structured-empty-header-member", b"S",
+            policy_vector, issuer_jwks_path,
+            evidence=standard_evidence(encoded_structured_header, original_signature),
+        )
+        malformed_header = encode_b64url(b"{")
+        run_issuer(
+            args.binary, temporary, "malformed-header", b"M", policy_vector, issuer_jwks_path,
+            evidence=standard_evidence(malformed_header, original_signature),
+        )
+        payload_json = b64url(standard_token["payload"]).decode("utf-8")
+        duplicate_payload = encode_b64url(
+            ('{"iss":"duplicate",' + payload_json[1:]).encode("utf-8")
+        )
+        run_issuer(
+            args.binary, temporary, "duplicate-payload-member", b"M", policy_vector,
+            issuer_jwks_path, payload=duplicate_payload,
+        )
+        run_issuer(
+            args.binary, temporary, "gq-commitment-mismatch", b"E",
+            issuer_vectors["gq-p256"], issuer_jwks_path, commitment="_" * 42 + "8",
+        )
+        gq_token = json.loads(issuer_vectors["gq-p256"]["token"])
+        gq_evidence = b64url(gq_token["credbind_evidence"])
+        gq_header_length = int.from_bytes(gq_evidence[:8], "big")
+        malformed_gq_header = encode_b64url(b"{").encode("ascii")
+        malformed_gq_evidence = (
+            struct.pack(">Q", len(malformed_gq_header))
+            + malformed_gq_header
+            + gq_evidence[8 + gq_header_length :]
+        )
+        run_issuer(
+            args.binary, temporary, "gq-malformed-header", b"E",
+            issuer_vectors["gq-p256"], issuer_jwks_path,
+            evidence=malformed_gq_evidence,
+        )
 
         modulus = b64url(issuer_key["n"])
         exponent = int.from_bytes(b64url(issuer_key["e"]), "big").to_bytes(4, "big")
@@ -290,6 +509,8 @@ def main() -> None:
         "gq_positive": 1,
         "jwks_negative": 12,
         "jwks_positive": 1,
+        "issuer_negative": 21,
+        "issuer_positive": 6,
         "standard_negative": 4,
         "standard_positive": 1,
         "status": "verified",

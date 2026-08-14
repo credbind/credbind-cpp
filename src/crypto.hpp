@@ -5,6 +5,8 @@
 
 #include "parse_error.hpp"
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string_view>
 #include <vector>
@@ -19,6 +21,10 @@ struct RsaPublicKey {
 };
 
 using VerificationResult = tl::expected<void, ParseError>;
+using Sha256Digest = std::array<std::uint8_t, 32>;
+
+[[nodiscard]] tl::expected<Sha256Digest, ParseError> digest_sha256(
+    const std::uint8_t* data, std::size_t size);
 
 [[nodiscard]] VerificationResult verify_rs256(std::string_view signing_input,
                                                const std::vector<std::uint8_t>& signature,
