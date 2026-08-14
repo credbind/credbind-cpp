@@ -2,6 +2,7 @@
 
 #include "base64url.hpp"
 #include "crypto.hpp"
+#include "jwks.hpp"
 #include "jws.hpp"
 #include "openssh_certificate.hpp"
 #include "parse_error.hpp"
@@ -15,6 +16,7 @@
 #include <limits>
 #include <string>
 #include <string_view>
+#include <unistd.h>
 #include <utility>
 #include <vector>
 
@@ -327,6 +329,39 @@ void verify_crypto_frame(const std::string& frame) {
     }
 }
 
+void test_jwks_policy() {
+    const auto result = credbind::jwks::load(
+        credbind::jwks::KeySource{credbind::jwks::KeySourceProfile::oidc_discovery, ""},
+        credbind::jwks::FilePolicy{static_cast<std::uint32_t>(::geteuid())});
+    expect_error(result, credbind::ParseErrorKind::unsupported_profile,
+                 "offline discovery rejection");
+    expect_error(
+        credbind::jwks::parse("{\"keys\":[]}", credbind::jwks::Limits{8U, 1U, 8U, 8U}),
+        credbind::ParseErrorKind::resource_limit, "static JWKS byte bound");
+}
+
+void verify_jwks_file(std::string_view path, std::string_view kid,
+                      credbind::ParseErrorKind expected, bool expect_success) {
+    const auto loaded = credbind::jwks::load(
+        credbind::jwks::KeySource{credbind::jwks::KeySourceProfile::static_jwks_file,
+                                 std::string(path)},
+        credbind::jwks::FilePolicy{static_cast<std::uint32_t>(::geteuid())});
+    if (expect_success) {
+        require(static_cast<bool>(loaded), "pinned static JWKS was rejected");
+        require(loaded->size() == 1U, "pinned static JWKS has wrong key count");
+        const auto key = loaded->resolve_rs256(kid);
+        require(key && key->exponent == 65537U && key->modulus.size() == 256U,
+                "pinned static JWKS key resolution failed");
+        return;
+    }
+    if (!loaded) {
+        require(loaded.error().kind == expected, "static JWKS had wrong error category");
+        return;
+    }
+    const auto key = loaded->resolve_rs256(kid);
+    expect_error(key, expected, "static JWKS key resolution rejection");
+}
+
 void test_core_envelope() {
     const std::string valid =
         R"({"payload":"AA","signatures":[{"protected":"AA","signature":"AA"}],"credbind_evidence":"AA"})";
@@ -374,6 +409,7 @@ int main(int argc, char** argv) {
     test_compact_jws();
     test_core_envelope();
     test_openssh_certificate();
+    test_jwks_policy();
     if (argc == 2) {
         const auto parsed = credbind::strict_json::parse_core_envelope(argv[1]);
         require(static_cast<bool>(parsed), "pinned core token did not pass strict envelope parsing");
@@ -393,6 +429,14 @@ int main(int argc, char** argv) {
                                 std::istreambuf_iterator<char>()};
         require(input.good() || input.eof(), "could not read cryptographic fixture file");
         verify_crypto_frame(frame);
+    } else if (argc == 5 && std::string_view(argv[1]) == "--jwks-file") {
+        const std::string_view expectation(argv[2]);
+        const bool expect_success = expectation == "pass";
+        require(expect_success || expectation == "untrusted" || expectation == "limit",
+                "unknown static JWKS test expectation");
+        const auto expected = expectation == "limit" ? credbind::ParseErrorKind::resource_limit
+                                                       : credbind::ParseErrorKind::issuer_untrusted;
+        verify_jwks_file(argv[3], argv[4], expected, expect_success);
     } else {
         require(argc == 1, "usage: parsers_test [core-token | parser mode]");
     }

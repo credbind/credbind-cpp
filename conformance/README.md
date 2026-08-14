@@ -12,6 +12,11 @@ certificates. It also exercises the independent standard RS256 and
 negative signature, framing, canonical-integer, transcript-substitution,
 round-order and RSA-key cases.
 
-This does not claim full corpus conformance: policy, the offline key source and
-the production command are not connected yet, and `make test-conformance`
-continues to fail closed until every applicable case has a complete harness.
+The same target loads the pinned issuer JWKS through the production offline
+file boundary and covers symlink, non-regular-file, group-write,
+duplicate-key-ID, private-member, duplicate-member, invalid-UTF-8,
+unsupported-role/algorithm/key, unknown-key-ID and trailing-data denials.
+
+This does not claim full corpus conformance: complete issuer policy and the
+production command are not connected yet, and `make test-conformance` continues
+to fail closed until every applicable case has a complete harness.

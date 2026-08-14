@@ -62,8 +62,23 @@ data. The implementation uses OpenSSL EVP for RS256 and OpenSSL BIGNUM for GQ;
 tests verify dynamic system `libcrypto` 3 linkage and reject `libssl` linkage.
 
 This layer is exercised directly against the immutable corpus. It is not yet
-wired through policy, the offline JWKS source or the production command, and it
-does not claim the maximum-size carrier, complete verifier or conformance gates.
+wired through complete issuer policy or the production command, and it does not
+claim the maximum-size carrier, complete verifier or conformance gates.
+
+## Offline issuer-key checkpoint
+
+The C++ verifier's typed key-source boundary admits only an absolute
+`static-jwks-file` path and rejects `oidc-discovery` without network activity.
+It opens one bounded descriptor with no symlink following, requires a regular
+file owned by the configured owner or root, and rejects group/other write
+permission. The schema-specific SAX parser accepts only complete public RS256
+signing JWKs and rejects duplicate JSON members or key IDs, private or unknown
+members, unsupported key roles, malformed canonical Base64url and trailing
+data. Unknown `kid` resolution fails closed.
+
+This checkpoint validates the offline file/key trust boundary independently.
+The issuer policy schema, complete token verifier, `config check`, and
+production command integration remain unfinished.
 
 ## Conformance input
 

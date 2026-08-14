@@ -11,7 +11,9 @@ namespace credbind {
 enum class ParseErrorKind {
     malformed_input,
     resource_limit,
+    unsupported_profile,
     unsupported_algorithm,
+    issuer_untrusted,
     issuer_signature_invalid,
     evidence_invalid
 };

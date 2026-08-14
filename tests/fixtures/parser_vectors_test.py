@@ -55,6 +55,10 @@ def run_crypto(binary: Path, directory: Path, name: str, frame: bytes) -> None:
     invoke(binary, "--crypto-file", str(path))
 
 
+def run_jwks(binary: Path, expectation: str, path: Path, kid: str) -> None:
+    invoke(binary, "--jwks-file", expectation, str(path), kid)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("binary", type=Path)
@@ -86,6 +90,71 @@ def main() -> None:
 
         jwks = load(corpus / "keys" / "issuer-jwks.json")
         issuer_key = jwks["keys"][0]
+        issuer_jwks_path = corpus / "keys" / "issuer-jwks.json"
+        run_jwks(args.binary, "pass", issuer_jwks_path, issuer_key["kid"])
+
+        unsafe_link = temporary / "issuer-jwks-link.json"
+        unsafe_link.symlink_to(issuer_jwks_path)
+        run_jwks(args.binary, "untrusted", unsafe_link, issuer_key["kid"])
+
+        non_regular = temporary / "issuer-jwks-fifo"
+        os.mkfifo(non_regular)
+        run_jwks(args.binary, "untrusted", non_regular, issuer_key["kid"])
+
+        group_writable = temporary / "issuer-jwks-group-writable.json"
+        group_writable.write_text(json.dumps(jwks), encoding="utf-8")
+        group_writable.chmod(0o660)
+        run_jwks(args.binary, "untrusted", group_writable, issuer_key["kid"])
+
+        duplicate_kid = temporary / "issuer-jwks-duplicate-kid.json"
+        duplicate_kid.write_text(
+            json.dumps({"keys": [issuer_key, issuer_key]}), encoding="utf-8"
+        )
+        run_jwks(args.binary, "untrusted", duplicate_kid, issuer_key["kid"])
+
+        private_key = dict(issuer_key)
+        private_key["d"] = "AA"
+        private_member = temporary / "issuer-jwks-private-member.json"
+        private_member.write_text(json.dumps({"keys": [private_key]}), encoding="utf-8")
+        run_jwks(args.binary, "untrusted", private_member, issuer_key["kid"])
+
+        trailing = temporary / "issuer-jwks-trailing.json"
+        trailing.write_text(json.dumps(jwks) + " []", encoding="utf-8")
+        run_jwks(args.binary, "untrusted", trailing, issuer_key["kid"])
+
+        duplicate_member = temporary / "issuer-jwks-duplicate-member.json"
+        duplicate_member.write_text(
+            '{"keys":[],"keys":' + json.dumps(jwks["keys"]) + "}", encoding="utf-8"
+        )
+        run_jwks(args.binary, "untrusted", duplicate_member, issuer_key["kid"])
+
+        wrong_role_key = dict(issuer_key)
+        wrong_role_key["use"] = "enc"
+        wrong_role = temporary / "issuer-jwks-wrong-role.json"
+        wrong_role.write_text(json.dumps({"keys": [wrong_role_key]}), encoding="utf-8")
+        run_jwks(args.binary, "untrusted", wrong_role, issuer_key["kid"])
+
+        wrong_algorithm_key = dict(issuer_key)
+        wrong_algorithm_key["alg"] = "PS256"
+        wrong_algorithm = temporary / "issuer-jwks-wrong-algorithm.json"
+        wrong_algorithm.write_text(
+            json.dumps({"keys": [wrong_algorithm_key]}), encoding="utf-8"
+        )
+        run_jwks(args.binary, "untrusted", wrong_algorithm, issuer_key["kid"])
+
+        wrong_exponent_key = dict(issuer_key)
+        wrong_exponent_key["e"] = "Aw"
+        wrong_exponent = temporary / "issuer-jwks-wrong-exponent.json"
+        wrong_exponent.write_text(
+            json.dumps({"keys": [wrong_exponent_key]}), encoding="utf-8"
+        )
+        run_jwks(args.binary, "untrusted", wrong_exponent, issuer_key["kid"])
+
+        invalid_utf8 = temporary / "issuer-jwks-invalid-utf8.json"
+        invalid_utf8.write_bytes(issuer_jwks_path.read_bytes().replace(b"RS256", b"RS\xff56"))
+        run_jwks(args.binary, "untrusted", invalid_utf8, issuer_key["kid"])
+        run_jwks(args.binary, "untrusted", issuer_jwks_path, "missing-key-id")
+
         modulus = b64url(issuer_key["n"])
         exponent = int.from_bytes(b64url(issuer_key["e"]), "big").to_bytes(4, "big")
 
@@ -219,6 +288,8 @@ def main() -> None:
         "core_tokens": 5,
         "gq_negative": 12,
         "gq_positive": 1,
+        "jwks_negative": 12,
+        "jwks_positive": 1,
         "standard_negative": 4,
         "standard_positive": 1,
         "status": "verified",
