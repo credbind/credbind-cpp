@@ -9,6 +9,7 @@
 #include "parse_error.hpp"
 
 #include <cstdint>
+#include <cstddef>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -30,9 +31,15 @@ struct CallerKey {
     std::vector<std::uint8_t> canonical_public_key;
 };
 
+struct CoreLimits {
+    std::size_t max_token_bytes = 32768U;
+    std::size_t max_evidence_bytes = 16384U;
+};
+
 struct CorePolicy {
     std::unordered_set<std::string> caller_algorithms;
     issuer::Policy issuer_policy;
+    CoreLimits limits{};
 };
 
 struct CoreResult {
@@ -80,13 +87,18 @@ struct CarrierResult {
     std::string ca_public_key_base64;
 };
 
+struct CarrierAuditContext {
+    bool core_verified = false;
+    CoreResult core;
+};
+
 using CarrierVerificationResult = tl::expected<CarrierResult, ParseError>;
 
 [[nodiscard]] CarrierVerificationResult verify_carrier(
     const CarrierInput& input, const CorePolicy& core_policy,
     const CarrierPolicy& carrier_policy, const AccountPolicies& accounts,
     const jwks::StaticJwks& keys,
-    openssh::Limits limits = {});
+    openssh::Limits limits = {}, CarrierAuditContext* audit_context = nullptr);
 
 }  // namespace credbind::direct
 

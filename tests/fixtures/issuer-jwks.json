@@ -1,0 +1,12 @@
+{
+  "keys": [
+    {
+      "alg": "RS256",
+      "e": "AQAB",
+      "kid": "fixture-rsa-2026",
+      "kty": "RSA",
+      "n": "se1oRySOZuPYI-nxYqcFyNRRf0mBOkTdh5JHoGkKjFD3rXOpUNgyA5QQjTdhh5e2-DJwp4xo99fmhCjZkFLuLWoUtWjjUkBAwzCfsLsXE0cUFaSc27ND1TU5aHql3_tmPh44xJi4E6rhVS0_eY-SsHjWKVqkFVaoxrgGTpHwmlaf631ThbN6wraaF3BcDVjMl8QQ9-GwDnMC3Rwibaoptsl9UnYZXGkLksc3uUuPFTpc1M3VyqTjCW9iR7KUFIFCJu3jqfk-utRqV89ve6FW6TAPZiBf44nWqgE3E8OMgSt5ALTyrVxXey9Lc4BAsrW5TWE3gghC8nYDZfmZHdV2ew",
+      "use": "sig"
+    }
+  ]
+}

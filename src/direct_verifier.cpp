@@ -827,7 +827,14 @@ bool account_rule_matches(const AccountRule& rule, const CoreResult& core,
 CoreVerificationResult verify_token(std::string_view token, const CorePolicy& policy,
                                     const jwks::StaticJwks& keys,
                                     std::int64_t verification_time_unix) {
-    if (token.size() > kMaximumTokenBytes) {
+    if (policy.limits.max_token_bytes == 0U ||
+        policy.limits.max_token_bytes > kMaximumTokenBytes ||
+        policy.limits.max_evidence_bytes == 0U ||
+        policy.limits.max_evidence_bytes > kMaximumEvidenceBytes) {
+        return tl::make_unexpected(error(ParseErrorKind::resource_limit,
+                                         "invalid configured core limits"));
+    }
+    if (token.size() > policy.limits.max_token_bytes) {
         return tl::make_unexpected(error(ParseErrorKind::resource_limit,
                                          "token exceeds protocol bound"));
     }
@@ -842,7 +849,8 @@ CoreVerificationResult verify_token(std::string_view token, const CorePolicy& po
         envelope->caller_signature.protected_header, kMaximumHeaderBytes);
     const auto caller_signature = base64url::decode(
         envelope->caller_signature.signature, 128U);
-    const auto evidence = base64url::decode(envelope->evidence, kMaximumEvidenceBytes);
+    const auto evidence = base64url::decode(envelope->evidence,
+                                            policy.limits.max_evidence_bytes);
     if (!payload || !protected_header || !caller_signature || !evidence) {
         if (!payload) return tl::make_unexpected(payload.error());
         if (!protected_header) return tl::make_unexpected(protected_header.error());
@@ -912,7 +920,8 @@ CarrierVerificationResult verify_carrier(const CarrierInput& input,
                                          const CarrierPolicy& carrier_policy,
                                          const AccountPolicies& accounts,
                                          const jwks::StaticJwks& keys,
-                                         openssh::Limits limits) {
+                                         openssh::Limits limits,
+                                         CarrierAuditContext* audit_context) {
     if (carrier_policy.clock_skew_seconds < 0 ||
         carrier_policy.maximum_identity_lifetime_seconds < 0) {
         return tl::make_unexpected(error(ParseErrorKind::issuer_untrusted,
@@ -935,6 +944,10 @@ CarrierVerificationResult verify_carrier(const CarrierInput& input,
     const std::string token(certificate->token.begin(), certificate->token.end());
     auto core = verify_token(token, core_policy, keys, input.verification_time_unix);
     if (!core) return tl::make_unexpected(core.error());
+    if (audit_context != nullptr) {
+        audit_context->core = *core;
+        audit_context->core_verified = true;
+    }
     const auto carrier_algorithm =
         certificate->caller_algorithm == openssh::CallerAlgorithm::es256
             ? CallerAlgorithm::es256

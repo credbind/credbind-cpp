@@ -41,7 +41,14 @@ internal verifier through its framed test ingress, and prints only a verified
 status. The descriptor is a conformance-only interchange file, not a shipping
 configuration format.
 
-This does not claim full corpus conformance: production configuration, command,
-logging, deadline and real-OpenSSH layers remain unfinished, and
-`make test-conformance` continues to fail closed until every applicable case
-has a complete harness.
+The current adapter checkpoint adds strict production configuration parsing,
+offline `config check`, injection-safe SSH rendering, silent verification
+denials and normalized bounded syslog events. The authenticated command/syslog
+test reuses the pinned P-256 carrier through an explicit test-only deadline
+bypass and proves exact output, trusted audit context and bearer redaction.
+
+This does not claim full corpus conformance: useful-policy/deny-all initializer
+inputs are underspecified by the shared contract, production authorization is
+blocked until total-deadline enforcement exists, and real OpenSSH remains
+unfinished. `test-cli`, full `test-integration`, `test-deadline` and
+`make test-conformance` continue to fail closed.

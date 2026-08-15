@@ -29,7 +29,11 @@ enum class ParseErrorKind {
     ssh_identity_not_yet_valid,
     ssh_identity_expired,
     ssh_principal_invalid,
-    account_unauthorized
+    account_unauthorized,
+    deadline_exceeded,
+    operation_cancelled,
+    state_invalid,
+    internal_error
 };
 
 struct ParseError final {

@@ -28,8 +28,8 @@ def main() -> None:
     if value != expected or completed.stderr:
         raise SystemExit(f"version output mismatch: {value!r}, stderr={completed.stderr!r}")
     denied = subprocess.run([args.binary, "verify"], capture_output=True)
-    if denied.returncode == 0 or denied.stdout:
-        raise SystemExit("unimplemented verification reported success or wrote stdout")
+    if denied.returncode != 0 or denied.stdout or denied.stderr:
+        raise SystemExit("verification denial observable contract mismatch")
 
 
 if __name__ == "__main__":

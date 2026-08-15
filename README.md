@@ -22,10 +22,10 @@ make dependencies-check
 make verify-binary
 ```
 
-At this checkpoint the command implements only deterministic
-`version`/`--version` output. Every other invocation fails nonzero and writes no
-stdout. `verify-binary` checks the native binary type and PIE status, rejects
-checkout-path leakage and compares two controlled builds byte for byte.
+The command now also contains the bounded configuration, CLI and local-syslog
+adapters described below. `verify-binary` checks the native binary type and PIE
+status, rejects checkout-path leakage and compares two controlled builds byte
+for byte.
 
 The aggregate `make test` and `make check` targets intentionally fail until
 all deterministic layers they promise are implemented. Required unfinished
@@ -109,8 +109,9 @@ certificate signature and ephemeral CA, canonical certified-key equality,
 credential-derived certificate validity, the derived principal, and
 default-deny account rules. One matching rule must own the exact issuer, every
 typed claim predicate, and the complete permission-extension subset; rules
-never combine. The returned carrier data is authenticated but is not yet
-formatted or emitted by the command.
+never combine. The returned carrier data is authenticated and the internal
+command adapter can format its one exact authorized-keys line. Production
+authorization remains disabled until the later total-deadline checkpoint.
 
 Pinned fixtures pass all five direct core vectors, including GQ, and the two
 published standard-evidence P-256 and Ed25519 carriers. The test binary also
@@ -118,9 +119,29 @@ provides a bounded `--direct-carrier-file` frame ingress for the early joint
 Go-generated maximum-size GQ carrier subgate. This is explicitly a conformance
 harness, not a production command or configuration format.
 
-Production configuration parsing, complete command/exit/stdout behavior,
-syslog, deadlines, fuzzing and real-OpenSSH execution remain unfinished and
-their required Make targets continue to fail closed.
+## Configuration, command and syslog adapter checkpoint
+
+The production parser now validates the complete typed server configuration,
+including resource and duration bounds, static JWKS, closed algorithms/profile
+pairings, same-issuer policies with unique policy IDs, account rules and the
+local syslog facility. `config check` is offline and uses that parser;
+`sshd-config render` validates its paths and user token before emitting the
+minimal deterministic fragment.
+
+The verification adapter implements the exact silent, zero-exit denial
+contract and emits one bounded R011 local-syslog event. Tests cover exact field
+order and severity, unsafe-username hashing, authenticated identifiers,
+identity references, overflow, redaction, logging failure and checked stdout.
+The internal authenticated allow path is available only through an explicit
+test-only deadline bypass.
+
+Production `verify` deliberately denies every attempt with empty stdout until
+a real total-deadline executor is implemented. `config init` also remains
+fail-closed because the shared contract does not specify the useful-policy flag
+grammar or selected deny-all defaults for clock skew, verification deadline and
+resource limits. `test-cli` and full `test-integration` therefore cannot report
+success. Deadline, sanitizer, fuzz, full conformance and real-OpenSSH targets
+remain later checkpoints and fail closed.
 
 ## Conformance input
 
@@ -128,11 +149,11 @@ their required Make targets continue to fail closed.
 An offline reproduction may set `CREDBIND_FIXTURE_SOURCE` to an existing asset;
 its SHA-256 must still match.
 
-All unfinished protocol-conformance, integration, syslog, deadline, sanitizer
-Make targets, fuzz and real-OpenSSH targets fail explicitly. In particular,
-`make test-conformance` cannot report success until the independent verifier
-actually passes the shared corpus. This baseline makes no conformance,
-security, packaging or platform-support claim.
+All unfinished complete CLI, integration, protocol-conformance, deadline,
+sanitizer, fuzz and real-OpenSSH targets fail explicitly. The implemented
+adapter subtargets and `test-syslog` are deterministic and offline; they do not
+close a shared rewrite gate. This baseline makes no release, security,
+packaging or platform-support claim.
 
 The project is licensed under Apache License 2.0. Contributions must include a
 Developer Certificate of Origin sign-off.
