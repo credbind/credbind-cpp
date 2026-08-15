@@ -11,6 +11,7 @@ import json
 import os
 import struct
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -142,6 +143,108 @@ def run_issuer(
     invoke(binary, "--issuer-file", str(path))
 
 
+def direct_carrier_frame(
+    mode: bytes,
+    certificate: bytes,
+    carrier: dict,
+    token_vector: dict,
+    jwks_path: Path,
+    *,
+    key_type: str | None = None,
+    requested_user: str = "fixture-user",
+    verification_time: int | None = None,
+    principal_claim: str = "sub",
+    caller_algorithms: str | None = None,
+    evidence_profiles: str | None = None,
+    binding_profiles: str | None = None,
+    admitted_claims: str = "sub,email,iat",
+    allowed_extensions: str = "permit-port-forwarding,permit-pty",
+    account_issuer: str | None = None,
+    account_claim: str = "sub",
+    account_value: str = "fixture-subject-v1-rc1",
+    maximum_identity_lifetime: int = 0,
+    clock_skew: int = 30,
+) -> bytes:
+    claims = token_vector["issuer_claims"]
+    audience = claims["aud"]
+    if isinstance(audience, list):
+        audience = audience[0]
+    return crypto_frame(
+        mode,
+        certificate,
+        (key_type or carrier["key_type_argument"]).encode("ascii"),
+        requested_user.encode("utf-8"),
+        token_vector["authenticated_issuer"].encode("utf-8"),
+        str(jwks_path).encode("utf-8"),
+        audience.encode("utf-8"),
+        claims.get("azp", "").encode("utf-8"),
+        str(verification_time or token_vector["verification_time"]).encode("ascii"),
+        principal_claim.encode("utf-8"),
+        (caller_algorithms or token_vector["caller_algorithm"]).encode("ascii"),
+        (evidence_profiles or token_vector["evidence_profile"]).encode("ascii"),
+        (binding_profiles or token_vector["binding_profile"]).encode("ascii"),
+        admitted_claims.encode("utf-8"),
+        allowed_extensions.encode("ascii"),
+        (account_issuer or token_vector["authenticated_issuer"]).encode("utf-8"),
+        account_claim.encode("utf-8"),
+        account_value.encode("utf-8"),
+        str(maximum_identity_lifetime).encode("ascii"),
+        str(clock_skew).encode("ascii"),
+        b"0",
+        carrier["principal"].encode("ascii"),
+        carrier["ca_public_key"].split(" ", 1)[0].encode("ascii"),
+        carrier["ca_public_key"].split(" ", 1)[1].encode("ascii"),
+    )
+
+
+def run_direct_carrier(
+    binary: Path,
+    directory: Path,
+    name: str,
+    frame: bytes,
+) -> None:
+    path = directory / f"direct-{name}.frame"
+    path.write_bytes(frame)
+    invoke(binary, "--direct-carrier-file", str(path))
+
+
+def run_direct_token(
+    binary: Path,
+    directory: Path,
+    name: str,
+    mode: bytes,
+    vector: dict,
+    jwks_path: Path,
+    *,
+    token: str | None = None,
+) -> None:
+    claims = vector["issuer_claims"]
+    audience = claims["aud"]
+    if isinstance(audience, list):
+        audience = audience[0]
+    frame = crypto_frame(
+        mode,
+        (token or vector["token"]).encode("utf-8"),
+        vector["authenticated_issuer"].encode("utf-8"),
+        str(jwks_path).encode("utf-8"),
+        audience.encode("utf-8"),
+        claims.get("azp", "").encode("utf-8"),
+        str(vector["verification_time"]).encode("ascii"),
+        vector["caller_algorithm"].encode("ascii"),
+        vector["evidence_profile"].encode("ascii"),
+        vector["binding_profile"].encode("ascii"),
+        b"sub,email,iat",
+        vector["expected_commitment"].encode("ascii"),
+        vector["caller_algorithm"].encode("ascii"),
+    )
+    path = directory / f"direct-token-{name}.frame"
+    path.write_bytes(frame)
+    try:
+        invoke(binary, "--direct-token-file", str(path))
+    except RuntimeError as failure:
+        raise RuntimeError(f"direct-token case {name} was rejected") from failure
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("binary", type=Path)
@@ -248,6 +351,232 @@ def main() -> None:
                 "gq-p256",
             )
         }
+
+        carrier_vectors = {
+            name: load(corpus / "vectors" / f"ssh-carrier-{name}.json")
+            for name in ("p256", "ed25519")
+        }
+        direct_positive = 0
+        direct_negative = 0
+        for name, vector in issuer_vectors.items():
+            run_direct_token(
+                args.binary, temporary, f"{name}-pass", b"P", vector,
+                issuer_jwks_path,
+            )
+            direct_positive += 1
+        caller_mutation_vector = issuer_vectors["gq-p256"]
+        caller_mutation = json.loads(caller_mutation_vector["token"])
+        caller_signature = caller_mutation["signatures"][0]["signature"]
+        caller_mutation["signatures"][0]["signature"] = (
+            ("A" if caller_signature[0] != "A" else "B") + caller_signature[1:]
+        )
+        run_direct_token(
+            args.binary, temporary, "gq-caller-signature", b"Q",
+            caller_mutation_vector, issuer_jwks_path,
+            token=json.dumps(caller_mutation, separators=(",", ":")),
+        )
+        direct_negative += 1
+        cic_vector = issuer_vectors["standard-p256"]
+
+        def mutate_cic(mutator, *, raw_prefix: str = "") -> str:
+            token_object = json.loads(cic_vector["token"])
+            protected = token_object["signatures"][0]["protected"]
+            header_text = b64url(protected).decode("utf-8")
+            header = json.loads(header_text)
+            mutator(header)
+            changed_header = json.dumps(header, separators=(",", ":"))
+            if raw_prefix:
+                changed_header = "{" + raw_prefix + changed_header[1:]
+            token_object["signatures"][0]["protected"] = encode_b64url(
+                changed_header.encode("utf-8")
+            )
+            return json.dumps(token_object, separators=(",", ":"))
+
+        cic_mutations = (
+            ("duplicate-member", b"M", lambda h: None, '"alg":"ES256",'),
+            ("unknown-member", b"M", lambda h: h.__setitem__("unknown", "x"), ""),
+            ("unsupported-version", b"W", lambda h: h.__setitem__(
+                "https://credbind.dev/core/v1#version", "2"), ""),
+            ("unsupported-role", b"W", lambda h: h.__setitem__(
+                "https://credbind.dev/core/v1#role", "other"), ""),
+            ("wrong-media-type", b"M", lambda h: h.__setitem__("typ", "JWT"), ""),
+            ("wrong-critical-set", b"M", lambda h: h["crit"].__setitem__(
+                4, "https://credbind.dev/core/v1#unknown"), ""),
+            ("algorithm-substitution", b"A", lambda h: h.__setitem__("alg", "EdDSA"), ""),
+            ("private-jwk", b"K", lambda h: h["jwk"].__setitem__("d", "AA"), ""),
+            ("invalid-point", b"K", lambda h: h["jwk"].__setitem__(
+                "x", encode_b64url(bytes(32))), ""),
+            ("wrong-nonce-length", b"M", lambda h: h.__setitem__(
+                "https://credbind.dev/core/v1#nonce", encode_b64url(bytes(15))), ""),
+            ("duplicate-crit", b"M", lambda h: h["crit"].__setitem__(
+                4, h["crit"][0]), ""),
+        )
+        for name, mode, mutator, raw_prefix in cic_mutations:
+            run_direct_token(
+                args.binary, temporary, f"cic-{name}", mode, cic_vector,
+                issuer_jwks_path, token=mutate_cic(mutator, raw_prefix=raw_prefix),
+            )
+            direct_negative += 1
+        for name, token_name in (("p256", "standard-p256"),
+                                 ("ed25519", "standard-ed25519")):
+            carrier = carrier_vectors[name]
+            token_vector = issuer_vectors[token_name]
+            certificate = base64.b64decode(
+                carrier["certificate_blob_base64"], validate=True
+            )
+            run_direct_carrier(
+                args.binary, temporary, f"{name}-pass",
+                direct_carrier_frame(
+                    b"P", certificate, carrier, token_vector, issuer_jwks_path
+                ),
+            )
+            direct_positive += 1
+
+            run_direct_carrier(
+                args.binary, temporary, f"{name}-wrong-key-type",
+                direct_carrier_frame(
+                    b"M", certificate, carrier, token_vector, issuer_jwks_path,
+                    key_type="ssh-rsa-cert-v01@openssh.com",
+                ),
+            )
+            run_direct_carrier(
+                args.binary, temporary, f"{name}-invalid-requested-user",
+                direct_carrier_frame(
+                    b"M", certificate, carrier, token_vector, issuer_jwks_path,
+                    requested_user="invalid\x01user",
+                ),
+            )
+            run_direct_carrier(
+                args.binary, temporary, f"{name}-principal-policy",
+                direct_carrier_frame(
+                    b"J", certificate, carrier, token_vector, issuer_jwks_path,
+                    principal_claim="email",
+                ),
+            )
+            run_direct_carrier(
+                args.binary, temporary, f"{name}-account-issuer",
+                direct_carrier_frame(
+                    b"D", certificate, carrier, token_vector, issuer_jwks_path,
+                    account_issuer="https://other-issuer.example.test",
+                ),
+            )
+            run_direct_carrier(
+                args.binary, temporary, f"{name}-account-predicate",
+                direct_carrier_frame(
+                    b"D", certificate, carrier, token_vector, issuer_jwks_path,
+                    account_value="other-subject",
+                ),
+            )
+            run_direct_carrier(
+                args.binary, temporary, f"{name}-account-one-of",
+                direct_carrier_frame(
+                    b"P", certificate, carrier, token_vector, issuer_jwks_path,
+                    account_claim="@one-of",
+                ),
+            )
+            direct_positive += 1
+            run_direct_carrier(
+                args.binary, temporary, f"{name}-account-array-wrong-type",
+                direct_carrier_frame(
+                    b"D", certificate, carrier, token_vector, issuer_jwks_path,
+                    account_claim="@array-wrong-type",
+                ),
+            )
+            run_direct_carrier(
+                args.binary, temporary, f"{name}-account-extension-subset",
+                direct_carrier_frame(
+                    b"D", certificate, carrier, token_vector, issuer_jwks_path,
+                    allowed_extensions="permit-pty",
+                ),
+            )
+            run_direct_carrier(
+                args.binary, temporary, f"{name}-account-rules-do-not-combine",
+                direct_carrier_frame(
+                    b"D", certificate, carrier, token_vector, issuer_jwks_path,
+                    account_claim="@split-rules",
+                ),
+            )
+            run_direct_carrier(
+                args.binary, temporary, f"{name}-identity-policy-boundary",
+                direct_carrier_frame(
+                    b"X", certificate, carrier, token_vector, issuer_jwks_path,
+                    maximum_identity_lifetime=60,
+                ),
+            )
+            changed_signature = bytearray(certificate)
+            changed_signature[-1] ^= 1
+            run_direct_carrier(
+                args.binary, temporary, f"{name}-certificate-signature",
+                direct_carrier_frame(
+                    b"V", bytes(changed_signature), carrier, token_vector,
+                    issuer_jwks_path,
+                ),
+            )
+            token = token_vector["token"]
+            token_object = json.loads(token)
+            signature_text = token_object["signatures"][0]["signature"]
+            token_object["signatures"][0]["signature"] = (
+                ("A" if signature_text[0] != "A" else "B") + signature_text[1:]
+            )
+            changed_token = json.dumps(token_object, separators=(",", ":"))
+            if len(changed_token) != len(token):
+                raise RuntimeError("caller-signature mutation changed token length")
+            changed_certificate = certificate.replace(
+                token.encode("utf-8"), changed_token.encode("utf-8"), 1
+            )
+            if changed_certificate == certificate:
+                raise RuntimeError("carrier token was not found for mutation")
+            run_direct_carrier(
+                args.binary, temporary, f"{name}-caller-signature",
+                direct_carrier_frame(
+                    b"Q", changed_certificate, carrier, token_vector,
+                    issuer_jwks_path,
+                ),
+            )
+            direct_negative += 11
+        external_carrier = carrier_vectors["p256"]
+        external_token = issuer_vectors["standard-p256"]
+        external_descriptor = temporary / "external-carrier.json"
+        external_descriptor.write_text(
+            json.dumps({
+                "certificate_blob_base64": external_carrier["certificate_blob_base64"],
+                "key_type_argument": external_carrier["key_type_argument"],
+                "requested_user": "fixture-user",
+                "issuer": external_token["authenticated_issuer"],
+                "jwks_path": str(issuer_jwks_path),
+                "audience": external_token["issuer_claims"]["aud"],
+                "authorized_party": external_token["issuer_claims"]["azp"],
+                "verification_time": external_token["verification_time"],
+                "principal_claim": "sub",
+                "caller_algorithms": ["ES256"],
+                "evidence_profiles": ["standard-jws-v1"],
+                "binding_profiles": ["oidc-nonce-v1"],
+                "admitted_claims": ["sub", "email", "iat"],
+                "account_rule": {
+                    "issuer": external_token["authenticated_issuer"],
+                    "claim": "sub",
+                    "value": "fixture-subject-v1-rc1",
+                    "allowed_certificate_extensions": [
+                        "permit-port-forwarding", "permit-pty"
+                    ],
+                },
+                "maximum_identity_lifetime_seconds": 0,
+                "clock_skew_seconds": 30,
+                "require_non_reconstructible_evidence": False,
+                "expected": {
+                    "principal": external_carrier["principal"],
+                    "ca_key_type": external_carrier["ca_public_key"].split(" ", 1)[0],
+                    "ca_public_key_base64": external_carrier["ca_public_key"].split(" ", 1)[1],
+                },
+            }),
+            encoding="utf-8",
+        )
+        invoke(
+            Path(sys.executable),
+            str(ROOT / "tests" / "fixtures" / "external_carrier_test.py"),
+            str(args.binary),
+            str(external_descriptor),
+        )
         for name, vector in issuer_vectors.items():
             run_issuer(args.binary, temporary, f"{name}-pass", b"P", vector, issuer_jwks_path)
         run_issuer(
@@ -505,6 +834,8 @@ def main() -> None:
         "certificates": 2,
         "compact_jws": 5,
         "core_tokens": 5,
+        "direct_carrier_negative": direct_negative,
+        "direct_carrier_positive": direct_positive,
         "gq_negative": 12,
         "gq_positive": 1,
         "jwks_negative": 12,

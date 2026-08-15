@@ -93,9 +93,34 @@ optional `nbf`, `exp`, clock skew and optional maximum credential age.
 
 The result contains only admitted claims, the authenticated issuer/key ID,
 binding, earliest credential-validity boundary and independently computed exact
-evidence-result digest. This is still an internal direct issuer-evidence layer:
-the CIC/caller signature, complete server configuration, account policy, SSH
-carrier authorization and production command remain unfinished.
+evidence-result digest. That layer remains independently testable and is now
+consumed by the internal direct verifier described below.
+
+## Direct verifier checkpoint
+
+The internal direct verifier now connects the strict envelope, CIC, offline
+issuer policy and OpenSSH certificate layers. It validates the exact
+nine-member CIC and public-only ES256 or Ed25519 JWK, computes the exact CIC
+commitment, independently binds the issuer result digest, and verifies the
+caller signature over the preserved JWS signing input.
+
+The carrier boundary verifies the offered key type, P-256 or Ed25519
+certificate signature and ephemeral CA, canonical certified-key equality,
+credential-derived certificate validity, the derived principal, and
+default-deny account rules. One matching rule must own the exact issuer, every
+typed claim predicate, and the complete permission-extension subset; rules
+never combine. The returned carrier data is authenticated but is not yet
+formatted or emitted by the command.
+
+Pinned fixtures pass all five direct core vectors, including GQ, and the two
+published standard-evidence P-256 and Ed25519 carriers. The test binary also
+provides a bounded `--direct-carrier-file` frame ingress for the early joint
+Go-generated maximum-size GQ carrier subgate. This is explicitly a conformance
+harness, not a production command or configuration format.
+
+Production configuration parsing, complete command/exit/stdout behavior,
+syslog, deadlines, fuzzing and real-OpenSSH execution remain unfinished and
+their required Make targets continue to fail closed.
 
 ## Conformance input
 

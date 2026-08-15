@@ -24,6 +24,24 @@ reconstructibility, issuer/audience/authorized-party/binding/required-claim/time
 failures, protected-header trust restrictions, duplicate claims, standard
 signature substitution and GQ transcript substitution.
 
-This does not claim full corpus conformance: complete issuer policy and the
-production command are not connected yet, and `make test-conformance` continues
-to fail closed until every applicable case has a complete harness.
+Direct-core integration additionally validates exact CIC schemas, public-only
+P-256 and Ed25519 caller JWKs, commitments, evidence-result binding and caller
+signatures for all five base vectors. Both published carrier certificates pass
+certificate-signature, certified-key, time, principal and same-rule account
+authorization. Direct negatives cover malformed or substituted CIC fields,
+private or invalid caller keys, caller and carrier signatures, key-type
+agreement, credential-derived identity bounds, principal policy, account
+issuer and typed predicates, permission subsets, and the prohibition on
+combining account rules.
+
+For the early cross-language subgate,
+`tests/fixtures/external_carrier_test.py TEST_BINARY DESCRIPTOR.json` accepts one
+bounded externally generated carrier and explicit test policy, invokes the same
+internal verifier through its framed test ingress, and prints only a verified
+status. The descriptor is a conformance-only interchange file, not a shipping
+configuration format.
+
+This does not claim full corpus conformance: production configuration, command,
+logging, deadline and real-OpenSSH layers remain unfinished, and
+`make test-conformance` continues to fail closed until every applicable case
+has a complete harness.

@@ -2,6 +2,7 @@
 
 #include "base64url.hpp"
 #include "crypto.hpp"
+#include "direct_verifier.hpp"
 #include "issuer_verifier.hpp"
 #include "jwks.hpp"
 #include "jws.hpp"
@@ -20,6 +21,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <unordered_map>
 #include <unordered_set>
 #include <unistd.h>
 #include <utility>
@@ -32,6 +34,20 @@ void require(bool condition, std::string_view message) {
         std::cerr << message << '\n';
         std::exit(1);
     }
+}
+
+std::string read_bounded_frame(const char* path, std::size_t maximum,
+                               std::string_view message) {
+    std::ifstream input(path, std::ios::binary | std::ios::ate);
+    require(static_cast<bool>(input), message);
+    const auto end = input.tellg();
+    require(end >= 0 && static_cast<std::uint64_t>(end) <= maximum, message);
+    std::string frame(static_cast<std::size_t>(end), '\0');
+    input.seekg(0, std::ios::beg);
+    input.read(frame.data(), static_cast<std::streamsize>(frame.size()));
+    require(input.good() || input.eof(), message);
+    require(static_cast<std::size_t>(input.gcount()) == frame.size(), message);
+    return frame;
 }
 
 template <typename Result>
@@ -473,6 +489,169 @@ void verify_issuer_frame(const std::string& frame) {
     expect_error(result, issuer_expected_error(mode), "issuer-verifier rejection");
 }
 
+std::unordered_set<std::string> split_set(std::string_view value) {
+    std::unordered_set<std::string> result;
+    std::size_t offset = 0U;
+    while (offset < value.size()) {
+        const auto comma = value.find(',', offset);
+        const auto item = value.substr(offset, comma == std::string_view::npos
+                                                  ? value.size() - offset
+                                                  : comma - offset);
+        require(!item.empty() && result.insert(std::string(item)).second,
+                "invalid direct-verifier test set");
+        if (comma == std::string_view::npos) break;
+        offset = comma + 1U;
+    }
+    return result;
+}
+
+std::int64_t parse_i64(std::string_view value, std::string_view name) {
+    std::int64_t parsed = 0;
+    const auto result = std::from_chars(value.data(), value.data() + value.size(), parsed);
+    require(result.ec == std::errc{} && result.ptr == value.data() + value.size(), name);
+    return parsed;
+}
+
+credbind::ParseErrorKind direct_expected_error(char mode) {
+    switch (mode) {
+        case 'M': return credbind::ParseErrorKind::malformed_input;
+        case 'W': return credbind::ParseErrorKind::unsupported_version;
+        case 'R': return credbind::ParseErrorKind::unsupported_profile;
+        case 'A': return credbind::ParseErrorKind::unsupported_algorithm;
+        case 'K': return credbind::ParseErrorKind::caller_key_invalid;
+        case 'E': return credbind::ParseErrorKind::evidence_result_mismatch;
+        case 'B': return credbind::ParseErrorKind::binding_invalid;
+        case 'Q': return credbind::ParseErrorKind::caller_signature_invalid;
+        case 'V': return credbind::ParseErrorKind::ssh_certificate_invalid;
+        case 'Y': return credbind::ParseErrorKind::ssh_key_mismatch;
+        case 'N': return credbind::ParseErrorKind::ssh_identity_not_yet_valid;
+        case 'X': return credbind::ParseErrorKind::ssh_identity_expired;
+        case 'J': return credbind::ParseErrorKind::ssh_principal_invalid;
+        case 'D': return credbind::ParseErrorKind::account_unauthorized;
+        default: return credbind::ParseErrorKind::malformed_input;
+    }
+}
+
+void verify_direct_carrier_frame(const std::string& frame) {
+    CryptoFrameReader reader(frame);
+    char mode = '\0';
+    require(reader.byte(mode), "invalid direct-verifier test frame");
+    require(mode == 'P' || mode == 'M' || mode == 'R' || mode == 'A' || mode == 'K' ||
+                mode == 'E' || mode == 'B' || mode == 'Q' || mode == 'V' || mode == 'Y' ||
+                mode == 'N' || mode == 'X' || mode == 'J' || mode == 'D',
+            "unknown direct-verifier test mode");
+    std::vector<std::string_view> fields;
+    for (std::size_t index = 0U; index < 23U; ++index) {
+        std::string_view field;
+        require(reader.field(field), "truncated direct-verifier test frame");
+        fields.push_back(field);
+    }
+    require(reader.empty(), "trailing direct-verifier test frame");
+    const auto loaded = credbind::jwks::load_static_file(
+        fields[4], credbind::jwks::FilePolicy{static_cast<std::uint32_t>(::geteuid())});
+    require(static_cast<bool>(loaded), "direct-verifier fixture JWKS was rejected");
+    credbind::issuer::Policy issuer_policy{
+        std::string(fields[3]), {std::string(fields[5])},
+        fields[6].empty() ? std::unordered_set<std::string>{}
+                          : std::unordered_set<std::string>{std::string(fields[6])},
+        {"RS256"}, split_set(fields[10]), split_set(fields[11]), fields[19] == "1",
+        0, parse_i64(fields[18], "invalid direct-verifier skew"), {},
+        split_set(fields[12])};
+    credbind::direct::CorePolicy core_policy{split_set(fields[9]),
+                                             std::move(issuer_policy)};
+    std::vector<credbind::issuer::Predicate> predicates;
+    if (fields[15] == "@one-of") {
+        predicates.push_back(credbind::issuer::Predicate{
+            "sub", credbind::issuer::PredicateOperation::string_one_of, "",
+            {"other-subject", "fixture-subject-v1-rc1"}});
+    } else if (fields[15] == "@array-wrong-type") {
+        predicates.push_back(credbind::issuer::Predicate{
+            "sub", credbind::issuer::PredicateOperation::string_array_contains,
+            "fixture-subject-v1-rc1", {}});
+    } else if (!fields[15].empty() && fields[15] != "@split-rules") {
+        predicates.push_back(credbind::issuer::Predicate{
+            std::string(fields[15]), credbind::issuer::PredicateOperation::string_equals,
+            std::string(fields[16]), {}});
+    }
+    credbind::direct::AccountPolicies accounts;
+    accounts[std::string(fields[2])].push_back(credbind::direct::AccountRule{
+        std::string(fields[14]), std::move(predicates), split_set(fields[13])});
+    if (fields[15] == "@split-rules") {
+        accounts[std::string(fields[2])].clear();
+        accounts[std::string(fields[2])].push_back(credbind::direct::AccountRule{
+            std::string(fields[14]),
+            {credbind::issuer::Predicate{
+                "sub", credbind::issuer::PredicateOperation::string_equals,
+                "fixture-subject-v1-rc1", {}}},
+            {"permit-pty"}});
+        accounts[std::string(fields[2])].push_back(credbind::direct::AccountRule{
+            std::string(fields[14]),
+            {credbind::issuer::Predicate{
+                "sub", credbind::issuer::PredicateOperation::string_equals,
+                "other-subject", {}}},
+            {"permit-port-forwarding", "permit-pty"}});
+    }
+    const auto result = credbind::direct::verify_carrier(
+        credbind::direct::CarrierInput{fields[0], fields[1], fields[2],
+                                       parse_i64(fields[7], "invalid direct-verifier time")},
+        core_policy,
+        credbind::direct::CarrierPolicy{
+            std::string(fields[8]),
+            parse_i64(fields[17], "invalid maximum identity lifetime"),
+            parse_i64(fields[18], "invalid carrier skew")},
+        accounts, *loaded);
+    if (mode == 'P') {
+        require(result && result->principal == fields[20] &&
+                    result->ca_key_type == fields[21] &&
+                    result->ca_public_key_base64 == fields[22] &&
+                    !result->core.commitment.empty() && !result->core.issuer.empty(),
+                "direct carrier fixture did not produce the exact complete result");
+        return;
+    }
+    expect_error(result, direct_expected_error(mode), "direct carrier rejection");
+}
+
+void verify_direct_token_frame(const std::string& frame) {
+    CryptoFrameReader reader(frame);
+    char mode = '\0';
+    require(reader.byte(mode) && (mode == 'P' || mode == 'Q' || mode == 'M' ||
+                                  mode == 'W' || mode == 'R' || mode == 'A' ||
+                                  mode == 'K'),
+            "invalid direct-token test mode");
+    std::vector<std::string_view> fields;
+    for (std::size_t index = 0U; index < 12U; ++index) {
+        std::string_view field;
+        require(reader.field(field), "truncated direct-token test frame");
+        fields.push_back(field);
+    }
+    require(reader.empty(), "trailing direct-token test frame");
+    const auto loaded = credbind::jwks::load_static_file(
+        fields[2], credbind::jwks::FilePolicy{static_cast<std::uint32_t>(::geteuid())});
+    require(static_cast<bool>(loaded), "direct-token fixture JWKS was rejected");
+    credbind::issuer::Policy issuer_policy{
+        std::string(fields[1]), {std::string(fields[3])},
+        fields[4].empty() ? std::unordered_set<std::string>{}
+                          : std::unordered_set<std::string>{std::string(fields[4])},
+        {"RS256"}, split_set(fields[7]), split_set(fields[8]), false, 0, 30, {},
+        split_set(fields[9])};
+    const auto result = credbind::direct::verify_token(
+        fields[0], credbind::direct::CorePolicy{split_set(fields[6]),
+                                                std::move(issuer_policy)},
+        *loaded, parse_i64(fields[5], "invalid direct-token time"));
+    if (mode == 'P') {
+        const auto expected_algorithm =
+            fields[11] == "ES256" ? credbind::direct::CallerAlgorithm::es256
+                                  : credbind::direct::CallerAlgorithm::ed25519;
+        require(result && result->commitment == fields[10] &&
+                    result->caller_key.algorithm == expected_algorithm &&
+                    result->evidence_profile == fields[7] &&
+                    result->binding_profile == fields[8],
+                "direct-token fixture did not produce the exact complete result");
+        return;
+    }
+    expect_error(result, direct_expected_error(mode), "direct-token rejection");
+}
+
 void test_core_envelope() {
     const std::string valid =
         R"({"payload":"AA","signatures":[{"protected":"AA","signature":"AA"}],"credbind_evidence":"AA"})";
@@ -554,6 +733,14 @@ int main(int argc, char** argv) {
                                 std::istreambuf_iterator<char>()};
         require(input.good() || input.eof(), "could not read issuer-verifier fixture file");
         verify_issuer_frame(frame);
+    } else if (argc == 3 && std::string_view(argv[1]) == "--direct-carrier-file") {
+        const auto frame = read_bounded_frame(
+            argv[2], 262144U, "invalid or oversized direct-verifier fixture file");
+        verify_direct_carrier_frame(frame);
+    } else if (argc == 3 && std::string_view(argv[1]) == "--direct-token-file") {
+        const auto frame = read_bounded_frame(
+            argv[2], 131072U, "invalid or oversized direct-token fixture file");
+        verify_direct_token_frame(frame);
     } else {
         require(argc == 1, "usage: parsers_test [core-token | parser mode]");
     }
