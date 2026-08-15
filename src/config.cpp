@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
@@ -26,6 +27,7 @@ namespace credbind::config {
 namespace {
 
 using Json = nlohmann::json;
+using OrderedJson = nlohmann::ordered_json;
 
 constexpr std::size_t kMaximumConfigurationBytes = 1048576U;
 constexpr std::size_t kMaximumDepth = 32U;
@@ -645,6 +647,167 @@ tl::expected<std::string, ParseError> read_file(std::string_view path,
     return contents;
 }
 
+tl::expected<std::uint64_t, ParseError> canonical_unsigned(
+    std::string_view value, std::uint64_t maximum) {
+    if (value.empty() || (value.size() > 1U && value.front() == '0')) {
+        return tl::make_unexpected(error(ParseErrorKind::malformed_input,
+                                         "non-canonical unsigned integer"));
+    }
+    std::uint64_t result = 0U;
+    for (const char character : value) {
+        if (character < '0' || character > '9') {
+            return tl::make_unexpected(error(ParseErrorKind::malformed_input,
+                                             "non-canonical unsigned integer"));
+        }
+        const auto digit = static_cast<std::uint64_t>(character - '0');
+        if (result > (maximum - digit) / 10U) {
+            return tl::make_unexpected(error(ParseErrorKind::resource_limit,
+                                             "initializer integer exceeds bound"));
+        }
+        result = result * 10U + digit;
+    }
+    if (result > maximum) {
+        return tl::make_unexpected(error(ParseErrorKind::resource_limit,
+                                         "initializer integer exceeds bound"));
+    }
+    return result;
+}
+
+tl::expected<std::uint64_t, ParseError> canonical_duration(
+    std::string_view value) {
+    std::size_t unit_length = 0U;
+    if (value.size() >= 2U &&
+        (value.substr(value.size() - 2U) == "ns" ||
+         value.substr(value.size() - 2U) == "us" ||
+         value.substr(value.size() - 2U) == "ms")) {
+        unit_length = 2U;
+    } else if (!value.empty() &&
+               (value.back() == 's' || value.back() == 'm' || value.back() == 'h')) {
+        unit_length = 1U;
+    }
+    if (unit_length == 0U || value.size() == unit_length) {
+        return tl::make_unexpected(error(ParseErrorKind::malformed_input,
+                                         "non-canonical initializer duration"));
+    }
+    const auto number = canonical_unsigned(
+        value.substr(0U, value.size() - unit_length),
+        std::numeric_limits<std::uint64_t>::max());
+    if (!number) return tl::make_unexpected(number.error());
+    return duration_nanoseconds(value);
+}
+
+OrderedJson ordered_predicate(const Json& value) {
+    OrderedJson output = OrderedJson::object();
+    output["claim"] = value.at("claim");
+    output["type"] = value.at("type");
+    output["op"] = value.at("op");
+    if (value.find("value") != value.end()) output["value"] = value.at("value");
+    if (value.find("values") != value.end()) output["values"] = value.at("values");
+    return output;
+}
+
+OrderedJson ordered_predicates(const Json& value) {
+    OrderedJson output = OrderedJson::array();
+    for (const auto& item : value) output.push_back(ordered_predicate(item));
+    return output;
+}
+
+OrderedJson ordered_issuer(const Json& value) {
+    OrderedJson output = OrderedJson::object();
+    output["policy_id"] = value.at("policy_id");
+    output["issuer"] = value.at("issuer");
+    OrderedJson source = OrderedJson::object();
+    source["type"] = value.at("key_source").at("type");
+    if (value.at("key_source").find("path") != value.at("key_source").end()) {
+        source["path"] = value.at("key_source").at("path");
+    }
+    output["key_source"] = std::move(source);
+    output["audiences"] = value.at("audiences");
+    if (value.find("authorized_parties") != value.end()) {
+        output["authorized_parties"] = value.at("authorized_parties");
+    }
+    output["issuer_algorithms"] = value.at("issuer_algorithms");
+    output["caller_algorithms"] = value.at("caller_algorithms");
+    output["evidence_profiles"] = value.at("evidence_profiles");
+    output["binding_profiles"] = value.at("binding_profiles");
+    output["acquisition_profiles"] = value.at("acquisition_profiles");
+    output["require_non_reconstructible_evidence"] =
+        value.at("require_non_reconstructible_evidence");
+    if (value.find("maximum_credential_age") != value.end()) {
+        output["maximum_credential_age"] = value.at("maximum_credential_age");
+    }
+    if (value.find("maximum_identity_lifetime") != value.end()) {
+        output["maximum_identity_lifetime"] = value.at("maximum_identity_lifetime");
+    }
+    output["certificate_principal_claim"] = value.at("certificate_principal_claim");
+    if (value.find("audit_identity_claim") != value.end()) {
+        output["audit_identity_claim"] = value.at("audit_identity_claim");
+    }
+    if (value.find("required_claims") != value.end()) {
+        output["required_claims"] = ordered_predicates(value.at("required_claims"));
+    }
+    if (value.find("environment_discriminator") != value.end()) {
+        output["environment_discriminator"] =
+            ordered_predicate(value.at("environment_discriminator"));
+    }
+    return output;
+}
+
+OrderedJson ordered_trusted_issuers(const Json& values) {
+    OrderedJson output = OrderedJson::array();
+    for (const auto& value : values) output.push_back(ordered_issuer(value));
+    return output;
+}
+
+OrderedJson ordered_accounts(const Json& values) {
+    OrderedJson output = OrderedJson::object();
+    for (const auto& account : values.items()) {
+        OrderedJson policy = OrderedJson::object();
+        OrderedJson rules = OrderedJson::array();
+        for (const auto& value : account.value().at("allow")) {
+            OrderedJson rule = OrderedJson::object();
+            rule["issuer"] = value.at("issuer");
+            rule["all"] = ordered_predicates(value.at("all"));
+            rule["allowed_certificate_extensions"] =
+                value.at("allowed_certificate_extensions");
+            rules.push_back(std::move(rule));
+        }
+        policy["allow"] = std::move(rules);
+        output[account.key()] = std::move(policy);
+    }
+    return output;
+}
+
+OrderedJson initialization_json(const InitializationOptions& options,
+                                const Json& trusted, const Json& accounts,
+                                std::uint64_t max_token,
+                                std::uint64_t max_evidence,
+                                std::uint64_t max_certificate,
+                                std::uint64_t max_offered,
+                                std::uint64_t max_output) {
+    OrderedJson output = OrderedJson::object();
+    output["version"] = 1U;
+    output["clock_skew"] = options.clock_skew;
+    output["total_verification_deadline"] = options.total_verification_deadline;
+    OrderedJson resources = OrderedJson::object();
+    resources["max_token_bytes"] = max_token;
+    resources["max_evidence_bytes"] = max_evidence;
+    resources["max_ssh_certificate_bytes"] = max_certificate;
+    resources["max_offered_key_chars"] = max_offered;
+    resources["max_authorized_keys_output_chars"] = max_output;
+    output["resource_limits"] = std::move(resources);
+    OrderedJson cache = OrderedJson::object();
+    cache["directory"] = options.issuer_key_cache_directory;
+    cache["maximum_freshness"] = options.issuer_key_cache_maximum_freshness;
+    output["issuer_key_cache"] = std::move(cache);
+    output["trusted_issuers"] = ordered_trusted_issuers(trusted);
+    output["accounts"] = ordered_accounts(accounts);
+    OrderedJson logging = OrderedJson::object();
+    logging["facility"] = options.logging_facility;
+    output["logging"] = std::move(logging);
+    return output;
+}
+
 }  // namespace
 
 Result parse_and_validate(std::string_view input, std::uint32_t required_owner) {
@@ -917,6 +1080,213 @@ Result load_and_validate(std::string_view path, std::uint32_t required_owner) {
     const auto contents = read_file(path, required_owner);
     if (!contents) return tl::make_unexpected(contents.error());
     return parse_and_validate(*contents, required_owner);
+}
+
+tl::expected<std::string, ParseError> initialize(
+    const InitializationOptions& options, std::uint32_t required_owner) {
+    if (options.deny_all == !options.policy_input_path.empty()) {
+        return tl::make_unexpected(error(ParseErrorKind::malformed_input,
+                                         "initializer mode is ambiguous"));
+    }
+    const auto skew = canonical_duration(options.clock_skew);
+    const auto deadline = canonical_duration(options.total_verification_deadline);
+    const auto freshness = canonical_duration(
+        options.issuer_key_cache_maximum_freshness);
+    if (!skew || !deadline || !freshness) {
+        if (!skew) return tl::make_unexpected(skew.error());
+        if (!deadline) return tl::make_unexpected(deadline.error());
+        return tl::make_unexpected(freshness.error());
+    }
+    if (*skew % kNanosecondsPerSecond != 0U ||
+        *skew > 30U * kNanosecondsPerSecond || *deadline == 0U ||
+        *deadline > 10U * kNanosecondsPerSecond ||
+        (*freshness != 0U &&
+         (*freshness < 60U * kNanosecondsPerSecond ||
+          *freshness > 720U * 3600U * kNanosecondsPerSecond))) {
+        return tl::make_unexpected(error(ParseErrorKind::resource_limit,
+                                         "initializer duration exceeds bound"));
+    }
+    const auto max_token = canonical_unsigned(options.max_token_bytes, 32768U);
+    const auto max_evidence = canonical_unsigned(options.max_evidence_bytes, 16384U);
+    const auto max_certificate = canonical_unsigned(
+        options.max_ssh_certificate_bytes, 49152U);
+    const auto max_offered = canonical_unsigned(options.max_offered_key_chars, 65536U);
+    const auto max_output = canonical_unsigned(
+        options.max_authorized_keys_output_chars, 4096U);
+    if (!max_token || !max_evidence || !max_certificate || !max_offered ||
+        !max_output || *max_token == 0U || *max_evidence == 0U ||
+        *max_certificate == 0U || *max_offered == 0U || *max_output == 0U) {
+        if (!max_token) return tl::make_unexpected(max_token.error());
+        if (!max_evidence) return tl::make_unexpected(max_evidence.error());
+        if (!max_certificate) return tl::make_unexpected(max_certificate.error());
+        if (!max_offered) return tl::make_unexpected(max_offered.error());
+        if (!max_output) return tl::make_unexpected(max_output.error());
+        return tl::make_unexpected(error(ParseErrorKind::resource_limit,
+                                         "initializer resource limit is zero"));
+    }
+    if (options.issuer_key_cache_directory.size() < 2U ||
+        options.issuer_key_cache_directory.front() != '/' ||
+        options.issuer_key_cache_directory.find('\0') != std::string::npos) {
+        return tl::make_unexpected(error(ParseErrorKind::malformed_input,
+                                         "initializer cache path is invalid"));
+    }
+    if (!audit::parse_facility(options.logging_facility)) {
+        return tl::make_unexpected(error(ParseErrorKind::unsupported_profile,
+                                         "initializer logging facility is unsupported"));
+    }
+
+    Json trusted = Json::array();
+    Json accounts = Json::object();
+    if (!options.deny_all) {
+        const auto bytes = read_file(options.policy_input_path, required_owner);
+        if (!bytes) return tl::make_unexpected(bytes.error());
+        const auto policy = parse_json(*bytes);
+        if (!policy) return tl::make_unexpected(policy.error());
+        if (!exact_members(*policy, {"trusted_issuers", "accounts"}) ||
+            !policy->at("trusted_issuers").is_array() ||
+            policy->at("trusted_issuers").empty() ||
+            !policy->at("accounts").is_object() || policy->at("accounts").empty()) {
+            return tl::make_unexpected(error(ParseErrorKind::malformed_input,
+                                             "invalid initialization policy"));
+        }
+        trusted = policy->at("trusted_issuers");
+        accounts = policy->at("accounts");
+    }
+
+    OrderedJson preliminary = OrderedJson::object();
+    preliminary["version"] = 1U;
+    preliminary["clock_skew"] = options.clock_skew;
+    preliminary["total_verification_deadline"] = options.total_verification_deadline;
+    preliminary["resource_limits"] = OrderedJson{
+        {"max_token_bytes", *max_token},
+        {"max_evidence_bytes", *max_evidence},
+        {"max_ssh_certificate_bytes", *max_certificate},
+        {"max_offered_key_chars", *max_offered},
+        {"max_authorized_keys_output_chars", *max_output}};
+    preliminary["issuer_key_cache"] = OrderedJson{
+        {"directory", options.issuer_key_cache_directory},
+        {"maximum_freshness", options.issuer_key_cache_maximum_freshness}};
+    preliminary["trusted_issuers"] = trusted;
+    preliminary["accounts"] = accounts;
+    preliminary["logging"] = OrderedJson{{"facility", options.logging_facility}};
+    const auto validated = parse_and_validate(preliminary.dump(), required_owner);
+    if (!validated) return tl::make_unexpected(validated.error());
+
+    try {
+        auto canonical = initialization_json(
+            options, trusted, accounts, *max_token, *max_evidence,
+            *max_certificate, *max_offered, *max_output);
+        return canonical.dump(2) + "\n";
+    } catch (...) {
+        return tl::make_unexpected(error(ParseErrorKind::internal_error,
+                                         "canonical configuration generation failed"));
+    }
+}
+
+tl::expected<void, ParseError> publish(
+    std::string_view path, std::string_view contents, bool force) {
+    if (path.empty() || path.front() != '/' || path.find('\0') != std::string_view::npos) {
+        return tl::make_unexpected(error(ParseErrorKind::state_invalid,
+                                         "output path is not absolute"));
+    }
+    const auto separator = path.rfind('/');
+    const std::string directory = separator == 0U
+                                      ? std::string{"/"}
+                                      : std::string(path.substr(0U, separator));
+    const std::string name(path.substr(separator + 1U));
+    if (name.empty() || name == "." || name == "..") {
+        return tl::make_unexpected(error(ParseErrorKind::state_invalid,
+                                         "output filename is invalid"));
+    }
+    const int directory_descriptor = ::open(
+        directory.c_str(), O_RDONLY | O_CLOEXEC | O_DIRECTORY);
+    if (directory_descriptor < 0) {
+        return tl::make_unexpected(error(ParseErrorKind::state_invalid,
+                                         "output directory cannot be opened"));
+    }
+    auto close_directory = [&]() { static_cast<void>(::close(directory_descriptor)); };
+    struct stat existing {};
+    if (::fstatat(directory_descriptor, name.c_str(), &existing,
+                  AT_SYMLINK_NOFOLLOW) == 0) {
+        if (!force || !S_ISREG(existing.st_mode)) {
+            close_directory();
+            return tl::make_unexpected(error(ParseErrorKind::state_invalid,
+                                             "output target already exists or is unsafe"));
+        }
+    } else if (errno != ENOENT) {
+        close_directory();
+        return tl::make_unexpected(error(ParseErrorKind::state_invalid,
+                                         "output target cannot be inspected"));
+    }
+
+    static std::atomic<std::uint64_t> sequence{0U};
+    int descriptor = -1;
+    std::string temporary;
+    for (std::size_t attempt = 0U; attempt < 64U && descriptor < 0; ++attempt) {
+        temporary = ".credbind-config-init." + std::to_string(::getpid()) + "." +
+            std::to_string(sequence.fetch_add(1U, std::memory_order_relaxed));
+        descriptor = ::openat(directory_descriptor, temporary.c_str(),
+                              O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW,
+                              S_IRUSR | S_IWUSR);
+        if (descriptor < 0 && errno != EEXIST) break;
+    }
+    if (descriptor < 0) {
+        close_directory();
+        return tl::make_unexpected(error(ParseErrorKind::state_invalid,
+                                         "output temporary file cannot be created"));
+    }
+    bool temporary_exists = true;
+    auto cleanup = [&]() {
+        if (descriptor >= 0) static_cast<void>(::close(descriptor));
+        if (temporary_exists) {
+            static_cast<void>(::unlinkat(directory_descriptor, temporary.c_str(), 0));
+        }
+        close_directory();
+    };
+    std::size_t offset = 0U;
+    while (offset < contents.size()) {
+        const auto written = ::write(descriptor, contents.data() + offset,
+                                     contents.size() - offset);
+        if (written < 0 && errno == EINTR) continue;
+        if (written <= 0) {
+            cleanup();
+            return tl::make_unexpected(error(ParseErrorKind::state_invalid,
+                                             "output temporary write failed"));
+        }
+        offset += static_cast<std::size_t>(written);
+    }
+    if (::fsync(descriptor) != 0 || ::close(descriptor) != 0) {
+        descriptor = -1;
+        cleanup();
+        return tl::make_unexpected(error(ParseErrorKind::state_invalid,
+                                         "output temporary synchronization failed"));
+    }
+    descriptor = -1;
+    if (force) {
+        if (::renameat(directory_descriptor, temporary.c_str(), directory_descriptor,
+                       name.c_str()) != 0) {
+            cleanup();
+            return tl::make_unexpected(error(ParseErrorKind::state_invalid,
+                                             "output atomic replacement failed"));
+        }
+        temporary_exists = false;
+    } else {
+        if (::linkat(directory_descriptor, temporary.c_str(), directory_descriptor,
+                     name.c_str(), 0) != 0 ||
+            ::unlinkat(directory_descriptor, temporary.c_str(), 0) != 0) {
+            cleanup();
+            return tl::make_unexpected(error(ParseErrorKind::state_invalid,
+                                             "output atomic publication failed"));
+        }
+        temporary_exists = false;
+    }
+    if (::fsync(directory_descriptor) != 0) {
+        close_directory();
+        return tl::make_unexpected(error(ParseErrorKind::state_invalid,
+                                         "output directory synchronization failed"));
+    }
+    close_directory();
+    return {};
 }
 
 tl::expected<void, ParseError> validate_render_path(std::string_view path,

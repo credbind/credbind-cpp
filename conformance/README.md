@@ -51,9 +51,10 @@ cancellation flag. Deterministic boundary tests cover cumulative expiry,
 cancellation, deadline-before-cancellation precedence, exact configuration
 bounds and zero authorization output on interruption.
 
-This does not claim full corpus conformance: useful-policy/deny-all initializer
-inputs are underspecified by the shared contract, individual synchronous calls
-are not preempted mid-call, and real OpenSSH timing remains unfinished.
-`test-cli`, `test-openssh`, sanitizer/fuzz and `make test-conformance` continue
-to fail closed; offline `test-integration`, `test-syslog` and `test-deadline`
-are implemented.
+The reconciled R005 initializer is implemented and fixture-tested for exact
+deny-all bytes, useful-policy validation and atomic private publication, so
+`test-cli` is now implemented. This does not claim full corpus conformance:
+individual synchronous calls are not preempted mid-call, and real OpenSSH
+timing remains unfinished. `test-openssh`, sanitizer/fuzz and
+`make test-conformance` continue to fail closed; offline `test-integration`,
+`test-syslog` and `test-deadline` are implemented.

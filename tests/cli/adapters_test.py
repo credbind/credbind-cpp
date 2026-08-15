@@ -40,8 +40,60 @@ def sample_config() -> bytes:
     return (json.dumps(value, separators=(",", ":")) + "\n").encode()
 
 
+def deny_all_config(**overrides: object) -> bytes:
+    value: dict[str, object] = {
+        "version": 1,
+        "clock_skew": "30s",
+        "total_verification_deadline": "5s",
+        "resource_limits": {
+            "max_token_bytes": 32768,
+            "max_evidence_bytes": 16384,
+            "max_ssh_certificate_bytes": 49152,
+            "max_offered_key_chars": 65536,
+            "max_authorized_keys_output_chars": 4096,
+        },
+        "issuer_key_cache": {
+            "directory": "/var/cache/credbind/ssh-verifier/v1",
+            "maximum_freshness": "336h",
+        },
+        "trusted_issuers": [],
+        "accounts": {},
+        "logging": {"facility": "authpriv"},
+    }
+    value.update(overrides)
+    return (json.dumps(value, indent=2) + "\n").encode()
+
+
+def policy_input(jwks: pathlib.Path) -> bytes:
+    value = {
+        "trusted_issuers": [{
+            "policy_id": "fixture",
+            "issuer": "https://issuer.example.test",
+            "key_source": {"type": "static-jwks-file", "path": str(jwks)},
+            "audiences": ["credbind-fixture-client"],
+            "issuer_algorithms": ["RS256"],
+            "caller_algorithms": ["ES256"],
+            "evidence_profiles": ["standard-jws-v1"],
+            "binding_profiles": ["oidc-nonce-v1"],
+            "acquisition_profiles": ["oidc-native-auth-code-v1"],
+            "require_non_reconstructible_evidence": False,
+            "certificate_principal_claim": "sub",
+        }],
+        "accounts": {
+            "alice": {"allow": [{
+                "issuer": "https://issuer.example.test",
+                "all": [{"claim": "group", "type": "string", "op": "equals",
+                         "value": "ops"}],
+                "allowed_certificate_extensions": ["permit-pty"],
+            }]},
+        },
+    }
+    return (json.dumps(value, separators=(",", ":")) + "\n").encode()
+
+
 def main() -> int:
     binary = pathlib.Path(sys.argv[1]).resolve()
+    jwks = pathlib.Path(sys.argv[2]).resolve()
     with tempfile.TemporaryDirectory(prefix="credbind-cli-") as temporary:
         root = pathlib.Path(temporary)
         config = root / "verifier.json"
@@ -83,12 +135,69 @@ def main() -> int:
                 "malformed verify never discloses arguments")
 
         for arguments in (("config", "init"),
-                          ("config", "init", "--deny-all"),
-                          ("config", "init", "--issuer", "https://example.test")):
+                          ("config", "init", "--issuer", "https://example.test"),
+                          ("config", "init", "--deny-all", "--deny-all"),
+                          ("config", "init", "--deny-all", "--force"),
+                          ("config", "init", "--deny-all", "--clock-skew", "030s"),
+                          ("config", "init", "--deny-all", "--clock-skew", "31s"),
+                          ("config", "init", "--deny-all",
+                           "--total-verification-deadline", "0s")):
             result = invoke(binary, *arguments)
             require(result.returncode != 0 and result.stdout == b"" and
                     b"bearer" not in result.stderr,
-                    "underspecified initializer remains fail closed")
+                    "invalid initializer remains fail closed")
+
+        result = invoke(binary, "config", "init", "--deny-all")
+        require((result.returncode, result.stdout, result.stderr) ==
+                (0, deny_all_config(), b""), "deny-all exact canonical output")
+
+        result = invoke(binary, "config", "init", "--deny-all",
+                        "--clock-skew", "0s", "--logging-facility", "local4")
+        require((result.returncode, result.stdout, result.stderr) ==
+                (0, deny_all_config(clock_skew="0s", logging={"facility": "local4"}), b""),
+                "operational overrides are canonical")
+
+        policy = root / "policy.json"
+        policy.write_bytes(policy_input(jwks))
+        policy.chmod(0o600)
+        result = invoke(binary, "config", "init", "--policy-input", str(policy))
+        require(result.returncode == 0 and result.stderr == b"" and
+                b'"policy_id": "fixture"' in result.stdout and
+                b'"alice"' in result.stdout,
+                "useful policy initialization")
+        useful = root / "useful.json"
+        useful.write_bytes(result.stdout)
+        useful.chmod(0o600)
+        checked = invoke(binary, "config", "check", "--config", str(useful))
+        require((checked.returncode, checked.stdout, checked.stderr) ==
+                (0, b"configuration valid\n", b""),
+                "initializer output accepted by production parser")
+
+        destination = root / "initialized.json"
+        result = invoke(binary, "config", "init", "--deny-all", "--output", str(destination))
+        require((result.returncode, result.stdout, result.stderr) == (0, b"", b"") and
+                destination.read_bytes() == deny_all_config() and
+                stat.S_IMODE(destination.stat().st_mode) == 0o600,
+                "atomic publication creates exact private file")
+        destination.write_bytes(b"preserve-me\n")
+        result = invoke(binary, "config", "init", "--deny-all", "--output", str(destination))
+        require(result.returncode != 0 and result.stdout == b"" and
+                destination.read_bytes() == b"preserve-me\n",
+                "existing output preserved without force")
+        result = invoke(binary, "config", "init", "--deny-all", "--output", str(destination),
+                        "--force")
+        require((result.returncode, result.stdout, result.stderr) == (0, b"", b"") and
+                destination.read_bytes() == deny_all_config() and
+                stat.S_IMODE(destination.stat().st_mode) == 0o600,
+                "force atomically replaces regular output")
+
+        symlink = root / "symlink.json"
+        symlink.symlink_to(destination)
+        result = invoke(binary, "config", "init", "--deny-all", "--output", str(symlink),
+                        "--force")
+        require(result.returncode != 0 and result.stdout == b"" and
+                destination.read_bytes() == deny_all_config(),
+                "force rejects symlink output")
 
         result = invoke(binary, "unknown", "bearer-canary")
         require(result.returncode != 0 and result.stdout == b"" and

@@ -142,11 +142,15 @@ and cancellation of offline configuration checking. Individual synchronous
 file, OpenSSL and output calls are bounded by admitted input sizes but are not
 preempted mid-call; real process/OpenSSH timing evidence remains a later gate.
 
-`config init` remains fail-closed because the shared contract does not specify
-the useful-policy flag grammar or selected deny-all defaults for clock skew,
-verification deadline and resource limits. `test-cli` therefore cannot report
-success. Sanitizer, fuzz, full conformance and real-OpenSSH targets remain later
-checkpoints and fail closed.
+`config init` implements the reconciled non-interactive R005 grammar. It emits
+the exact canonical deny-all profile or combines a strict two-member policy
+input with explicit operational overrides. `--output` uses same-directory
+atomic 0600 publication, rejects unsafe targets and never overwrites without
+`--force`; forced replacement is limited to regular files. The initializer
+reuses the production typed parser, including offline static-JWKS validation.
+`test-cli` now covers exact bytes, useful policy, bounds, publication and safe
+failures. Sanitizer, fuzz, full conformance and real-OpenSSH targets remain
+later checkpoints and fail closed.
 
 ## Conformance input
 

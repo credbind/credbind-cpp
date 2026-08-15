@@ -44,12 +44,31 @@ struct Configuration {
     audit::Facility facility;
 };
 
+struct InitializationOptions {
+    bool deny_all = false;
+    std::string policy_input_path;
+    std::string clock_skew = "30s";
+    std::string total_verification_deadline = "5s";
+    std::string max_token_bytes = "32768";
+    std::string max_evidence_bytes = "16384";
+    std::string max_ssh_certificate_bytes = "49152";
+    std::string max_offered_key_chars = "65536";
+    std::string max_authorized_keys_output_chars = "4096";
+    std::string issuer_key_cache_directory = "/var/cache/credbind/ssh-verifier/v1";
+    std::string issuer_key_cache_maximum_freshness = "336h";
+    std::string logging_facility = "authpriv";
+};
+
 using Result = tl::expected<Configuration, ParseError>;
 
 [[nodiscard]] Result parse_and_validate(std::string_view input,
                                         std::uint32_t required_owner);
 [[nodiscard]] Result load_and_validate(std::string_view path,
                                        std::uint32_t required_owner);
+[[nodiscard]] tl::expected<std::string, ParseError> initialize(
+    const InitializationOptions& options, std::uint32_t required_owner);
+[[nodiscard]] tl::expected<void, ParseError> publish(
+    std::string_view path, std::string_view contents, bool force);
 [[nodiscard]] tl::expected<void, ParseError> validate_render_path(
     std::string_view path, bool require_regular_file);
 [[nodiscard]] bool valid_command_user(std::string_view user) noexcept;

@@ -79,11 +79,9 @@ $(TEST_BINARY): tests/unit/parsers_test.cpp src/base64url.cpp src/base64url.hpp 
 
 test-cli:
 	@$(MAKE) --no-print-directory test-cli-adapters
-	@echo "test-cli cannot report complete: shared config-init defaults and useful-policy flag grammar are unspecified" >&2
-	@exit 1
 
 test-cli-adapters: build
-	$(PYTHON) tests/cli/adapters_test.py "$(BINARY)"
+	$(PYTHON) tests/cli/adapters_test.py "$(BINARY)" "$(CURDIR)/tests/fixtures/issuer-jwks.json"
 
 test-integration-adapters: test-cli-adapters test-syslog-adapters
 	@echo "specified offline config/check/render/verify integration passed"

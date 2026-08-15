@@ -12,6 +12,7 @@
 #include <limits>
 #include <ostream>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -342,31 +343,76 @@ int run_dispatch(const std::vector<std::string_view>& arguments, std::ostream& o
         return run_verify(arguments, output, logger, clock);
     }
     if (arguments[0] == "config" && arguments.size() >= 2U && arguments[1] == "init") {
-        bool deny_all = false;
+        config::InitializationOptions options;
         bool force = false;
         bool have_output = false;
         std::string_view output_path;
+        std::unordered_set<std::string_view> seen;
         for (std::size_t index = 2U; index < arguments.size(); ++index) {
-            if (arguments[index] == "--deny-all" && !deny_all) {
-                deny_all = true;
-            } else if (arguments[index] == "--force" && !force) {
+            const auto flag = arguments[index];
+            if (!seen.insert(flag).second) {
+                return fail(diagnostics, ParseErrorKind::malformed_input);
+            }
+            if (flag == "--deny-all") {
+                options.deny_all = true;
+            } else if (flag == "--force") {
                 force = true;
-            } else if (arguments[index] == "--output" && !have_output &&
-                       index + 1U < arguments.size()) {
+            } else if (index + 1U >= arguments.size()) {
+                return fail(diagnostics, ParseErrorKind::malformed_input);
+            } else if (flag == "--output") {
                 have_output = true;
                 output_path = arguments[++index];
+            } else if (flag == "--policy-input") {
+                options.policy_input_path = std::string(arguments[++index]);
+            } else if (flag == "--clock-skew") {
+                options.clock_skew = std::string(arguments[++index]);
+            } else if (flag == "--total-verification-deadline") {
+                options.total_verification_deadline = std::string(arguments[++index]);
+            } else if (flag == "--max-token-bytes") {
+                options.max_token_bytes = std::string(arguments[++index]);
+            } else if (flag == "--max-evidence-bytes") {
+                options.max_evidence_bytes = std::string(arguments[++index]);
+            } else if (flag == "--max-ssh-certificate-bytes") {
+                options.max_ssh_certificate_bytes = std::string(arguments[++index]);
+            } else if (flag == "--max-offered-key-chars") {
+                options.max_offered_key_chars = std::string(arguments[++index]);
+            } else if (flag == "--max-authorized-keys-output-chars") {
+                options.max_authorized_keys_output_chars =
+                    std::string(arguments[++index]);
+            } else if (flag == "--issuer-key-cache-directory") {
+                options.issuer_key_cache_directory = std::string(arguments[++index]);
+            } else if (flag == "--issuer-key-cache-maximum-freshness") {
+                options.issuer_key_cache_maximum_freshness =
+                    std::string(arguments[++index]);
+            } else if (flag == "--logging-facility") {
+                options.logging_facility = std::string(arguments[++index]);
             } else {
                 return fail(diagnostics, ParseErrorKind::malformed_input);
             }
         }
-        if (!deny_all || (force && !have_output)) {
+        if (force && !have_output) {
             return fail(diagnostics, ParseErrorKind::malformed_input);
         }
-        // The shared contract does not yet define the selected values for the
-        // mandatory skew, deadline, and resource fields. Emitting guessed trust
-        // configuration would not be deterministic across implementations.
-        static_cast<void>(output_path);
-        return fail(diagnostics, ParseErrorKind::state_invalid);
+        if (clock.cancellation_requested()) {
+            return fail(diagnostics, ParseErrorKind::operation_cancelled);
+        }
+        const auto generated = config::initialize(
+            options, static_cast<std::uint32_t>(::geteuid()));
+        if (!generated) return fail(diagnostics, generated.error().kind);
+        if (clock.cancellation_requested()) {
+            return fail(diagnostics, ParseErrorKind::operation_cancelled);
+        }
+        if (have_output) {
+            const auto published = config::publish(output_path, *generated, force);
+            if (!published) return fail(diagnostics, published.error().kind);
+        } else {
+            const auto written = output.rdbuf()->sputn(
+                generated->data(), static_cast<std::streamsize>(generated->size()));
+            if (written != static_cast<std::streamsize>(generated->size())) {
+                return fail(diagnostics, ParseErrorKind::internal_error);
+            }
+        }
+        return 0;
     }
     if (arguments[0] == "config" && arguments.size() == 4U &&
         arguments[1] == "check" && arguments[2] == "--config") {
