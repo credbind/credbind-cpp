@@ -11,9 +11,9 @@ input. The implementation order and acceptance requirements are owned by the
 
 The repository Makefile is the canonical interface. The host C++17 command is
 built under `dist/<system>-<architecture>/` with strict warnings, optimization,
-PIE, stack protection, fortification, platform relocation hardening, stripped
-symbols, remapped source paths, atomic publication and controlled version
-metadata:
+PIE, hidden symbol visibility, stack protection, fortification, platform
+relocation hardening, stripped symbols, remapped source paths, atomic
+publication and controlled version metadata:
 
 ```sh
 make build
@@ -110,8 +110,7 @@ credential-derived certificate validity, the derived principal, and
 default-deny account rules. One matching rule must own the exact issuer, every
 typed claim predicate, and the complete permission-extension subset; rules
 never combine. The returned carrier data is authenticated and the internal
-command adapter can format its one exact authorized-keys line. Production
-authorization remains disabled until the later total-deadline checkpoint.
+command adapter formats its one exact authorized-keys line.
 
 Pinned fixtures pass all five direct core vectors, including GQ, and the two
 published standard-evidence P-256 and Ed25519 carriers. The test binary also
@@ -132,16 +131,22 @@ The verification adapter implements the exact silent, zero-exit denial
 contract and emits one bounded R011 local-syslog event. Tests cover exact field
 order and severity, unsafe-username hashing, authenticated identifiers,
 identity references, overflow, redaction, logging failure and checked stdout.
-The internal authenticated allow path is available only through an explicit
-test-only deadline bypass.
+Production `verify` applies one configured monotonic budget, capped at ten
+seconds, from command entry through the final pre-output boundary. SIGINT and
+SIGTERM set a signal-safe cancellation flag. Every verification stage checks
+the same absolute budget, with deadline preceding simultaneous cancellation,
+and denial remains zero-exit with empty stdout and one audit event. Deterministic
+tests cover authenticated production output, cumulative expiry, cancellation,
+their simultaneous precedence, the exact ten-second configuration boundary,
+and cancellation of offline configuration checking. Individual synchronous
+file, OpenSSL and output calls are bounded by admitted input sizes but are not
+preempted mid-call; real process/OpenSSH timing evidence remains a later gate.
 
-Production `verify` deliberately denies every attempt with empty stdout until
-a real total-deadline executor is implemented. `config init` also remains
-fail-closed because the shared contract does not specify the useful-policy flag
-grammar or selected deny-all defaults for clock skew, verification deadline and
-resource limits. `test-cli` and full `test-integration` therefore cannot report
-success. Deadline, sanitizer, fuzz, full conformance and real-OpenSSH targets
-remain later checkpoints and fail closed.
+`config init` remains fail-closed because the shared contract does not specify
+the useful-policy flag grammar or selected deny-all defaults for clock skew,
+verification deadline and resource limits. `test-cli` therefore cannot report
+success. Sanitizer, fuzz, full conformance and real-OpenSSH targets remain later
+checkpoints and fail closed.
 
 ## Conformance input
 
@@ -149,11 +154,11 @@ remain later checkpoints and fail closed.
 An offline reproduction may set `CREDBIND_FIXTURE_SOURCE` to an existing asset;
 its SHA-256 must still match.
 
-All unfinished complete CLI, integration, protocol-conformance, deadline,
-sanitizer, fuzz and real-OpenSSH targets fail explicitly. The implemented
-adapter subtargets and `test-syslog` are deterministic and offline; they do not
-close a shared rewrite gate. This baseline makes no release, security,
-packaging or platform-support claim.
+All unfinished complete CLI, protocol-conformance, sanitizer, fuzz and
+real-OpenSSH targets fail explicitly. The implemented integration, syslog and
+deadline targets are deterministic and offline; they do not close the real
+OpenSSH gate. This baseline makes no release, security, packaging or
+platform-support claim.
 
 The project is licensed under Apache License 2.0. Contributions must include a
 Developer Certificate of Origin sign-off.

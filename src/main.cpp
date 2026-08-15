@@ -2,6 +2,7 @@
 
 #include "command.hpp"
 
+#include <csignal>
 #include <exception>
 #include <iostream>
 #include <string_view>
@@ -26,6 +27,20 @@
 namespace {
 
 constexpr std::string_view kCommand = "credbind-ssh-authorized-keys";
+volatile std::sig_atomic_t cancellation_requested = 0;
+
+extern "C" void request_cancellation(int) {
+    cancellation_requested = 1;
+}
+
+bool install_cancellation_handlers() {
+    struct sigaction action {};
+    action.sa_handler = request_cancellation;
+    if (sigemptyset(&action.sa_mask) != 0) return false;
+    action.sa_flags = 0;
+    return ::sigaction(SIGINT, &action, nullptr) == 0 &&
+           ::sigaction(SIGTERM, &action, nullptr) == 0;
+}
 
 int run_main(int argc, char* argv[]) {
     if (argc == 2) {
@@ -42,8 +57,10 @@ int run_main(int argc, char* argv[]) {
     arguments.reserve(argc > 1 ? static_cast<std::size_t>(argc - 1) : 0U);
     for (int index = 1; index < argc; ++index) arguments.emplace_back(argv[index]);
     credbind::audit::SyslogLogger logger;
-    credbind::command::SystemClock clock;
     try {
+        cancellation_requested = 0;
+        if (!install_cancellation_handlers()) throw 1;
+        credbind::command::SystemClock clock(&cancellation_requested);
         return credbind::command::run(arguments, std::cout, std::cerr, logger, clock);
     } catch (...) {
         // Verify must never cause OpenSSH to disclose its expanded bearer argument.

@@ -20,15 +20,37 @@
 namespace credbind::command {
 namespace {
 
+constexpr std::uint64_t kNanosecondsPerMillisecond = 1000000U;
+constexpr std::uint64_t kMaximumVerificationNanoseconds = 10U * 1000U *
+                                                           kNanosecondsPerMillisecond;
+
 ParseError error(ParseErrorKind kind, std::string message) {
     return ParseError{kind, std::move(message)};
 }
 
 std::uint32_t duration(Clock& clock, std::uint64_t started) {
-    const auto ended = clock.monotonic_milliseconds();
-    const auto elapsed = ended >= started ? ended - started : 0U;
+    const auto ended = clock.monotonic_nanoseconds();
+    const auto elapsed = ended >= started
+                             ? (ended - started) / kNanosecondsPerMillisecond
+                             : 0U;
     return static_cast<std::uint32_t>(
         std::min<std::uint64_t>(elapsed, std::numeric_limits<std::uint32_t>::max()));
+}
+
+struct Interruption final {
+    bool triggered;
+    ParseErrorKind reason;
+};
+
+Interruption interrupted(Clock& clock, std::uint64_t started,
+                         std::uint64_t budget) {
+    const auto now = clock.monotonic_nanoseconds();
+    if (now < started) return {true, ParseErrorKind::internal_error};
+    if (now - started >= budget) return {true, ParseErrorKind::deadline_exceeded};
+    if (clock.cancellation_requested()) {
+        return {true, ParseErrorKind::operation_cancelled};
+    }
+    return {false, ParseErrorKind::internal_error};
 }
 
 void emit(audit::Logger& logger, audit::Facility facility,
@@ -154,13 +176,17 @@ int deny_verify(std::string_view requested_user, ParseErrorKind reason,
 }
 
 int run_verify(const std::vector<std::string_view>& args, std::ostream& output,
-               audit::Logger& logger, Clock& clock,
-               bool unsafe_test_only_bypass_deadline) {
-    const auto started = clock.monotonic_milliseconds();
+               audit::Logger& logger, Clock& clock) {
+    const auto started = clock.monotonic_nanoseconds();
+    std::uint64_t budget = kMaximumVerificationNanoseconds;
     std::string_view config_path;
     std::string_view requested_user;
     std::string_view encoded_key;
     std::string_view key_type;
+    if (const auto state = interrupted(clock, started, budget); state.triggered) {
+        return deny_verify(requested_user, state.reason, audit::Facility::authpriv,
+                           started, logger, clock);
+    }
     if (args.size() == 9U && args[1] == "--config" && args[3] == "--user" &&
         args[5] == "--key" && args[7] == "--key-type") {
         config_path = args[2];
@@ -171,15 +197,20 @@ int run_verify(const std::vector<std::string_view>& args, std::ostream& output,
         return deny_verify(requested_user, ParseErrorKind::malformed_input,
                            audit::Facility::authpriv, started, logger, clock);
     }
-    if (!unsafe_test_only_bypass_deadline) {
-        return deny_verify(requested_user, ParseErrorKind::state_invalid,
-                           audit::Facility::authpriv, started, logger, clock);
+    if (const auto state = interrupted(clock, started, budget); state.triggered) {
+        return deny_verify(requested_user, state.reason, audit::Facility::authpriv,
+                           started, logger, clock);
     }
     const auto configuration = config::load_and_validate(
         config_path, static_cast<std::uint32_t>(::geteuid()));
     if (!configuration) {
         return deny_verify(requested_user, configuration.error().kind,
                            audit::Facility::authpriv, started, logger, clock);
+    }
+    budget = configuration->total_verification_deadline_nanoseconds;
+    if (const auto state = interrupted(clock, started, budget); state.triggered) {
+        return deny_verify(requested_user, state.reason, configuration->facility,
+                           started, logger, clock);
     }
     if (encoded_key.size() > configuration->resource_limits.max_offered_key_chars) {
         return deny_verify(requested_user, ParseErrorKind::resource_limit,
@@ -191,12 +222,20 @@ int run_verify(const std::vector<std::string_view>& args, std::ostream& output,
         return deny_verify(requested_user, blob.error().kind,
                            configuration->facility, started, logger, clock);
     }
+    if (const auto state = interrupted(clock, started, budget); state.triggered) {
+        return deny_verify(requested_user, state.reason, configuration->facility,
+                           started, logger, clock);
+    }
     const std::string certificate(reinterpret_cast<const char*>(blob->data()), blob->size());
     std::vector<std::pair<std::size_t, direct::CarrierResult>> successes;
     ParseErrorKind first_error = ParseErrorKind::issuer_untrusted;
     bool have_error = false;
     std::vector<std::pair<std::size_t, direct::CoreResult>> authenticated;
     for (std::size_t index = 0U; index < configuration->trusted_issuers.size(); ++index) {
+        if (const auto state = interrupted(clock, started, budget); state.triggered) {
+            return deny_verify(requested_user, state.reason, configuration->facility,
+                               started, logger, clock);
+        }
         const auto& policy = configuration->trusted_issuers[index];
         direct::CarrierAuditContext context;
         auto result = direct::verify_carrier(
@@ -207,12 +246,24 @@ int run_verify(const std::vector<std::string_view>& args, std::ostream& output,
             openssh::Limits{configuration->resource_limits.max_ssh_certificate_bytes,
                             configuration->resource_limits.max_token_bytes, 16U, 16U, 256U},
             &context);
+        if (const auto state = interrupted(clock, started, budget); state.triggered) {
+            const direct::CoreResult* core = nullptr;
+            if (result) core = &result->core;
+            else if (context.core_verified) core = &context.core;
+            return deny_verify(requested_user, state.reason, configuration->facility,
+                               started, logger, clock, core == nullptr ? nullptr : &policy,
+                               core);
+        }
         if (result) {
             successes.emplace_back(index, std::move(*result));
         } else {
             if (!have_error) { first_error = result.error().kind; have_error = true; }
             if (context.core_verified) authenticated.emplace_back(index, std::move(context.core));
         }
+    }
+    if (const auto state = interrupted(clock, started, budget); state.triggered) {
+        return deny_verify(requested_user, state.reason, configuration->facility,
+                           started, logger, clock);
     }
     if (successes.size() != 1U) {
         const auto reason = successes.size() > 1U ? ParseErrorKind::issuer_untrusted
@@ -230,10 +281,18 @@ int run_verify(const std::vector<std::string_view>& args, std::ostream& output,
     const auto& policy = configuration->trusted_issuers[selected.first];
     const std::string line = "cert-authority,principals=\"" + selected.second.principal +
         "\" " + selected.second.ca_key_type + " " + selected.second.ca_public_key_base64 + "\n";
+    if (const auto state = interrupted(clock, started, budget); state.triggered) {
+        return deny_verify(requested_user, state.reason, configuration->facility,
+                           started, logger, clock, &policy, &selected.second.core);
+    }
     if (line.size() > configuration->resource_limits.max_authorized_keys_output_chars) {
         return deny_verify(requested_user, ParseErrorKind::resource_limit,
                            configuration->facility, started, logger, clock,
                            &policy, &selected.second.core);
+    }
+    if (const auto state = interrupted(clock, started, budget); state.triggered) {
+        return deny_verify(requested_user, state.reason, configuration->facility,
+                           started, logger, clock, &policy, &selected.second.core);
     }
     const auto written = output.rdbuf()->sputn(
         line.data(), static_cast<std::streamsize>(line.size()));
@@ -259,23 +318,28 @@ int fail(std::ostream& diagnostics, ParseErrorKind kind) {
 
 }  // namespace
 
+SystemClock::SystemClock(const volatile std::sig_atomic_t* cancellation) noexcept
+    : cancellation_(cancellation) {}
+
 std::int64_t SystemClock::wall_time_unix() noexcept {
     return static_cast<std::int64_t>(std::chrono::duration_cast<std::chrono::seconds>(
         std::chrono::system_clock::now().time_since_epoch()).count());
 }
 
-std::uint64_t SystemClock::monotonic_milliseconds() noexcept {
-    return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+std::uint64_t SystemClock::monotonic_nanoseconds() noexcept {
+    return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count());
 }
 
+bool SystemClock::cancellation_requested() noexcept {
+    return cancellation_ != nullptr && *cancellation_ != 0;
+}
+
 int run_dispatch(const std::vector<std::string_view>& arguments, std::ostream& output,
-                 std::ostream& diagnostics, audit::Logger& logger, Clock& clock,
-                 bool unsafe_test_only_bypass_deadline) {
+                 std::ostream& diagnostics, audit::Logger& logger, Clock& clock) {
     if (arguments.empty()) return fail(diagnostics, ParseErrorKind::malformed_input);
     if (arguments[0] == "verify") {
-        return run_verify(arguments, output, logger, clock,
-                          unsafe_test_only_bypass_deadline);
+        return run_verify(arguments, output, logger, clock);
     }
     if (arguments[0] == "config" && arguments.size() >= 2U && arguments[1] == "init") {
         bool deny_all = false;
@@ -306,12 +370,27 @@ int run_dispatch(const std::vector<std::string_view>& arguments, std::ostream& o
     }
     if (arguments[0] == "config" && arguments.size() == 4U &&
         arguments[1] == "check" && arguments[2] == "--config") {
-        const auto started = clock.monotonic_milliseconds();
+        const auto started = clock.monotonic_nanoseconds();
+        if (clock.cancellation_requested()) {
+            audit::ConfigurationEvent event;
+            event.outcome = audit::ConfigurationOutcome::error;
+            event.reason = ParseErrorKind::operation_cancelled;
+            event.duration_ms = duration(clock, started);
+            emit(logger, audit::Facility::authpriv, event);
+            return fail(diagnostics, ParseErrorKind::operation_cancelled);
+        }
         const auto checked = config::load_and_validate(
             arguments[3], static_cast<std::uint32_t>(::geteuid()));
         audit::ConfigurationEvent event;
         event.duration_ms = duration(clock, started);
         audit::Facility facility = audit::Facility::authpriv;
+        if (clock.cancellation_requested()) {
+            event.outcome = audit::ConfigurationOutcome::error;
+            event.reason = ParseErrorKind::operation_cancelled;
+            if (checked) facility = checked->facility;
+            emit(logger, facility, event);
+            return fail(diagnostics, ParseErrorKind::operation_cancelled);
+        }
         if (checked) {
             event.outcome = audit::ConfigurationOutcome::valid;
             event.reason.reset();
@@ -338,9 +417,15 @@ int run_dispatch(const std::vector<std::string_view>& arguments, std::ostream& o
     if (arguments[0] == "sshd-config" && arguments.size() == 8U &&
         arguments[1] == "render" && arguments[2] == "--config" &&
         arguments[4] == "--verifier" && arguments[6] == "--command-user") {
+        if (clock.cancellation_requested()) {
+            return fail(diagnostics, ParseErrorKind::operation_cancelled);
+        }
         const auto checked = config::load_and_validate(
             arguments[3], static_cast<std::uint32_t>(::geteuid()));
         if (!checked) return fail(diagnostics, checked.error().kind);
+        if (clock.cancellation_requested()) {
+            return fail(diagnostics, ParseErrorKind::operation_cancelled);
+        }
         const auto config_path = config::validate_render_path(arguments[3], true);
         const auto verifier_path = config::validate_render_path(arguments[5], true);
         if (!config_path) return fail(diagnostics, config_path.error().kind);
@@ -362,13 +447,11 @@ int run_dispatch(const std::vector<std::string_view>& arguments, std::ostream& o
     return fail(diagnostics, ParseErrorKind::malformed_input);
 }
 
-int run_with_test_setting(const std::vector<std::string_view>& arguments,
-                          std::ostream& output, std::ostream& diagnostics,
-                          audit::Logger& logger, Clock& clock,
-                          bool unsafe_test_only_bypass_deadline) {
+int run_catching_exceptions(const std::vector<std::string_view>& arguments,
+                            std::ostream& output, std::ostream& diagnostics,
+                            audit::Logger& logger, Clock& clock) {
     try {
-        return run_dispatch(arguments, output, diagnostics, logger, clock,
-                            unsafe_test_only_bypass_deadline);
+        return run_dispatch(arguments, output, diagnostics, logger, clock);
     } catch (...) {
         if (!arguments.empty() && arguments.front() == "verify") {
             std::string_view requested_user;
@@ -391,14 +474,7 @@ int run_with_test_setting(const std::vector<std::string_view>& arguments,
 
 int run(const std::vector<std::string_view>& arguments, std::ostream& output,
         std::ostream& diagnostics, audit::Logger& logger, Clock& clock) {
-    return run_with_test_setting(arguments, output, diagnostics, logger, clock, false);
-}
-
-int run_for_test(const std::vector<std::string_view>& arguments,
-                 std::ostream& output, std::ostream& diagnostics,
-                 audit::Logger& logger, Clock& clock,
-                 UnsafeTestOnlyBypassDeadline) {
-    return run_with_test_setting(arguments, output, diagnostics, logger, clock, true);
+    return run_catching_exceptions(arguments, output, diagnostics, logger, clock);
 }
 
 }  // namespace credbind::command

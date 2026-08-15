@@ -53,19 +53,45 @@ class DropLogger final : public credbind::audit::Logger {
 class FakeClock final : public credbind::command::Clock {
   public:
     std::int64_t wall_time_unix() noexcept override { return wall; }
-    std::uint64_t monotonic_milliseconds() noexcept override {
+    std::uint64_t monotonic_nanoseconds() noexcept override {
         const auto result = monotonic;
-        monotonic += 7U;
+        monotonic += 7000000U;
         return result;
     }
+    bool cancellation_requested() noexcept override { return cancelled; }
     std::int64_t wall = 1786061100;
-    std::uint64_t monotonic = 100U;
+    std::uint64_t monotonic = 100000000U;
+    bool cancelled = false;
 };
 
 class ThrowClock final : public credbind::command::Clock {
   public:
     std::int64_t wall_time_unix() override { throw 1; }
-    std::uint64_t monotonic_milliseconds() override { throw 1; }
+    std::uint64_t monotonic_nanoseconds() override { throw 1; }
+    bool cancellation_requested() override { throw 1; }
+};
+
+class AdvancingClock final : public credbind::command::Clock {
+  public:
+    std::int64_t wall_time_unix() noexcept override { return wall; }
+    std::uint64_t monotonic_nanoseconds() noexcept override {
+        const auto result = monotonic;
+        monotonic += step;
+        return result;
+    }
+    bool cancellation_requested() noexcept override { return cancelled; }
+    std::int64_t wall = 1788739500;
+    std::uint64_t monotonic = 0U;
+    std::uint64_t step = 0U;
+    bool cancelled = false;
+};
+
+class CancelAfterCheckClock final : public credbind::command::Clock {
+  public:
+    std::int64_t wall_time_unix() noexcept override { return 1788739500; }
+    std::uint64_t monotonic_nanoseconds() noexcept override { return 0U; }
+    bool cancellation_requested() noexcept override { return calls++ != 0U; }
+    std::uint32_t calls = 0U;
 };
 
 class RejectBuffer final : public std::streambuf {
@@ -218,6 +244,15 @@ void test_config(std::string_view jwks_path) {
     require(!config::parse_and_validate(
         "{\"version\":1,\"version\":1}", owner), "duplicate config member rejected");
 
+    std::string maximum_deadline = base_config();
+    maximum_deadline.replace(maximum_deadline.find("5s"), 2U, "10s");
+    require(static_cast<bool>(config::parse_and_validate(maximum_deadline, owner)),
+            "exact ten-second deadline admitted");
+    maximum_deadline.replace(maximum_deadline.find("10s"), 3U, "10s1ns");
+    const auto over_deadline = config::parse_and_validate(maximum_deadline, owner);
+    require(!over_deadline && over_deadline.error().kind == ParseErrorKind::resource_limit,
+            "deadline above ten seconds rejected");
+
     const auto first = issuer_policy(jwks_path, "first");
     const auto second = issuer_policy(jwks_path, "second");
     parsed = config::parse_and_validate(base_config("[" + first + "," + second + "]"), owner);
@@ -335,9 +370,8 @@ void test_authenticated_command(std::string_view vector_path,
     clock.wall = 1788739500;
     std::ostringstream output;
     std::ostringstream diagnostics;
-    require(credbind::command::run_for_test(
-                arguments, output, diagnostics, logger, clock,
-                credbind::command::UnsafeTestOnlyBypassDeadline{}) == 0,
+    require(credbind::command::run(
+                arguments, output, diagnostics, logger, clock) == 0,
             "authenticated command exit");
     require(output.str() == carrier.at("authorized_keys_output").get<std::string>() &&
             diagnostics.str().empty(), "authenticated command exact line");
@@ -356,9 +390,8 @@ void test_authenticated_command(std::string_view vector_path,
     dropped_clock.wall = 1788739500;
     std::ostringstream dropped_output;
     std::ostringstream dropped_diagnostics;
-    require(credbind::command::run_for_test(
-                arguments, dropped_output, dropped_diagnostics, dropped, dropped_clock,
-                credbind::command::UnsafeTestOnlyBypassDeadline{}) == 0 &&
+    require(credbind::command::run(
+                arguments, dropped_output, dropped_diagnostics, dropped, dropped_clock) == 0 &&
             dropped.calls == 1 &&
             dropped_output.str() == carrier.at("authorized_keys_output").get<std::string>() &&
             dropped_diagnostics.str().empty(),
@@ -370,14 +403,54 @@ void test_authenticated_command(std::string_view vector_path,
     FakeClock failed_clock;
     failed_clock.wall = 1788739500;
     std::ostringstream failed_diagnostics;
-    require(credbind::command::run_for_test(
-                arguments, failed_output, failed_diagnostics, failed_logger, failed_clock,
-                credbind::command::UnsafeTestOnlyBypassDeadline{}) == 0 &&
+    require(credbind::command::run(
+                arguments, failed_output, failed_diagnostics, failed_logger, failed_clock) == 0 &&
             failed_logger.calls == 1 &&
             failed_logger.payload.find("\"result\":\"error\"") != std::string::npos &&
             failed_logger.payload.find("\"reason\":\"internal_error\"") != std::string::npos &&
             failed_logger.payload.find(encoded) == std::string::npos,
             "failed authorization output is internal-error denial");
+
+    AdvancingClock deadline_clock;
+    deadline_clock.step = 1000000000U;
+    FakeLogger deadline_logger;
+    std::ostringstream deadline_output;
+    std::ostringstream deadline_diagnostics;
+    require(credbind::command::run(arguments, deadline_output, deadline_diagnostics,
+                                   deadline_logger, deadline_clock) == 0 &&
+            deadline_output.str().empty() && deadline_diagnostics.str().empty() &&
+            deadline_logger.calls == 1 &&
+            deadline_logger.payload.find("\"reason\":\"deadline_exceeded\"") !=
+                std::string::npos,
+            "cumulative configured deadline denies before output");
+
+    AdvancingClock cancelled_clock;
+    cancelled_clock.cancelled = true;
+    FakeLogger cancelled_logger;
+    std::ostringstream cancelled_output;
+    std::ostringstream cancelled_diagnostics;
+    require(credbind::command::run(arguments, cancelled_output, cancelled_diagnostics,
+                                   cancelled_logger, cancelled_clock) == 0 &&
+            cancelled_output.str().empty() && cancelled_diagnostics.str().empty() &&
+            cancelled_logger.calls == 1 &&
+            cancelled_logger.payload.find("\"reason\":\"operation_cancelled\"") !=
+                std::string::npos,
+            "cancellation denies before output");
+
+    AdvancingClock simultaneous_clock;
+    simultaneous_clock.step = 10000000000U;
+    simultaneous_clock.cancelled = true;
+    FakeLogger simultaneous_logger;
+    std::ostringstream simultaneous_output;
+    std::ostringstream simultaneous_diagnostics;
+    require(credbind::command::run(arguments, simultaneous_output,
+                                   simultaneous_diagnostics, simultaneous_logger,
+                                   simultaneous_clock) == 0 &&
+            simultaneous_output.str().empty() && simultaneous_diagnostics.str().empty() &&
+            simultaneous_logger.calls == 1 &&
+            simultaneous_logger.payload.find("\"reason\":\"deadline_exceeded\"") !=
+                std::string::npos,
+            "deadline precedes simultaneous cancellation");
 
     const std::vector<std::string_view> check{"config", "check", "--config", path};
     FakeLogger check_logger;
@@ -389,6 +462,24 @@ void test_authenticated_command(std::string_view vector_path,
             check_logger.payload.find("\"result\":\"error\"") != std::string::npos &&
             check_diagnostics.str() == "internal_error\n",
             "config-check output failure is audited internal error");
+
+    CancelAfterCheckClock check_cancel_clock;
+    FakeLogger check_cancel_logger;
+    std::ostringstream check_cancel_output;
+    std::ostringstream check_cancel_diagnostics;
+    require(credbind::command::run(check, check_cancel_output,
+                                   check_cancel_diagnostics, check_cancel_logger,
+                                   check_cancel_clock) != 0 &&
+            check_cancel_output.str().empty() &&
+            check_cancel_diagnostics.str() == "operation_cancelled\n" &&
+            check_cancel_logger.calls == 1 &&
+            check_cancel_logger.facility == credbind::audit::Facility::local3 &&
+            check_cancel_logger.severity == credbind::audit::Severity::notice &&
+            check_cancel_logger.payload.find("\"result\":\"error\"") !=
+                std::string::npos &&
+            check_cancel_logger.payload.find("\"reason\":\"operation_cancelled\"") !=
+                std::string::npos,
+            "config-check cancellation is silent on stdout and audited");
 
     const std::vector<std::string_view> render{
         "sshd-config", "render", "--config", path, "--verifier", "/bin/sh",

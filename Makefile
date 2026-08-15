@@ -24,7 +24,7 @@ LIBCRYPTO_CFLAGS := $(shell $(PKG_CONFIG) --cflags libcrypto 2>/dev/null) -DOPEN
 LIBCRYPTO_LIBS := $(shell $(PKG_CONFIG) --libs libcrypto 2>/dev/null)
 THIRD_PARTY_HEADERS := third_party/nlohmann/json.hpp third_party/tl/expected.hpp
 CPPFLAGS := '-DCREDBIND_VERSION="$(VERSION)"' '-DCREDBIND_REVISION="$(REVISION)"' '-DCREDBIND_SOURCE_DATE_EPOCH="$(SOURCE_DATE_EPOCH)"' '-DCREDBIND_TARGET="$(TARGET)"'
-CXXFLAGS := -std=c++17 -O2 -fPIE -fstack-protector-strong -D_FORTIFY_SOURCE=3 -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow -Wformat=2 -Werror -ffile-prefix-map=$(CURDIR)=. -fdebug-prefix-map=$(CURDIR)=. -fmacro-prefix-map=$(CURDIR)=.
+CXXFLAGS := -std=c++17 -O2 -fPIE -fvisibility=hidden -fvisibility-inlines-hidden -fstack-protector-strong -D_FORTIFY_SOURCE=3 -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow -Wformat=2 -Werror -ffile-prefix-map=$(CURDIR)=. -fdebug-prefix-map=$(CURDIR)=. -fmacro-prefix-map=$(CURDIR)=.
 
 ifeq ($(TARGET_SYSTEM),linux)
 LDFLAGS := -pie -Wl,-z,relro,-z,now,-z,noexecstack -Wl,--as-needed
@@ -85,12 +85,10 @@ test-cli:
 test-cli-adapters: build
 	$(PYTHON) tests/cli/adapters_test.py "$(BINARY)"
 
-test-integration-adapters: test-cli-adapters
+test-integration-adapters: test-cli-adapters test-syslog-adapters
 	@echo "specified offline config/check/render/verify integration passed"
 
 test-integration: test-integration-adapters
-	@echo "test-integration cannot report complete: production verification remains deadline-blocked" >&2
-	@exit 1
 
 test-syslog-adapters: fixtures $(ADAPTER_TEST_BINARY)
 	$(ADAPTER_TEST_BINARY) "$(CURDIR)/tests/fixtures/issuer-jwks.json" \
@@ -98,6 +96,11 @@ test-syslog-adapters: fixtures $(ADAPTER_TEST_BINARY)
 		"$(CURDIR)/.cache/conformance/v1.0.0-rc.1/corpus/credbind-ssh-v1-conformance-v1.0.0-rc.1/keys/issuer-jwks.json"
 
 test-syslog: test-syslog-adapters
+
+test-deadline: fixtures $(ADAPTER_TEST_BINARY)
+	$(ADAPTER_TEST_BINARY) "$(CURDIR)/tests/fixtures/issuer-jwks.json" \
+		"$(CURDIR)/.cache/conformance/v1.0.0-rc.1/corpus/credbind-ssh-v1-conformance-v1.0.0-rc.1/vectors/ssh-carrier-p256.json" \
+		"$(CURDIR)/.cache/conformance/v1.0.0-rc.1/corpus/credbind-ssh-v1-conformance-v1.0.0-rc.1/keys/issuer-jwks.json"
 
 test-readme:
 	@$(MAKE) --no-print-directory _not-implemented TARGET_NAME=$@
@@ -119,7 +122,7 @@ verify-binary: build
 	@test "$(TARGET)" = "$(HOST_SYSTEM)-$(HOST_ARCH)" || { echo "verify-binary requires the host target" >&2; exit 1; }
 	$(PYTHON) scripts/verify_binary.py --binary "$(BINARY)" --target "$(TARGET)" --version "$(VERSION)" --revision "$(REVISION)" --source-date-epoch "$(SOURCE_DATE_EPOCH)"
 
-test-conformance test-deadline test-openssh test-sanitize test-fuzz-smoke fuzz:
+test-conformance test-openssh test-sanitize test-fuzz-smoke fuzz:
 	@$(MAKE) --no-print-directory _not-implemented TARGET_NAME=$@
 
 _not-implemented:

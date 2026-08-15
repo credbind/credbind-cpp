@@ -44,11 +44,16 @@ configuration format.
 The current adapter checkpoint adds strict production configuration parsing,
 offline `config check`, injection-safe SSH rendering, silent verification
 denials and normalized bounded syslog events. The authenticated command/syslog
-test reuses the pinned P-256 carrier through an explicit test-only deadline
-bypass and proves exact output, trusted audit context and bearer redaction.
+test reuses the pinned P-256 carrier through the production command path and
+proves exact output, trusted audit context and bearer redaction. The same path
+uses one configured monotonic deadline capped at ten seconds and a signal-safe
+cancellation flag. Deterministic boundary tests cover cumulative expiry,
+cancellation, deadline-before-cancellation precedence, exact configuration
+bounds and zero authorization output on interruption.
 
 This does not claim full corpus conformance: useful-policy/deny-all initializer
-inputs are underspecified by the shared contract, production authorization is
-blocked until total-deadline enforcement exists, and real OpenSSH remains
-unfinished. `test-cli`, full `test-integration`, `test-deadline` and
-`make test-conformance` continue to fail closed.
+inputs are underspecified by the shared contract, individual synchronous calls
+are not preempted mid-call, and real OpenSSH timing remains unfinished.
+`test-cli`, `test-openssh`, sanitizer/fuzz and `make test-conformance` continue
+to fail closed; offline `test-integration`, `test-syslog` and `test-deadline`
+are implemented.
