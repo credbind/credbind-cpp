@@ -27,9 +27,9 @@ adapters described below. `verify-binary` checks the native binary type and PIE
 status, rejects checkout-path leakage and compares two controlled builds byte
 for byte.
 
-The aggregate `make test` and `make check` targets intentionally fail until
-all deterministic layers they promise are implemented. Required unfinished
-targets never skip or report success.
+The aggregate `make test` and `make check` targets cover the implemented
+deterministic offline layers. Required external or separately instrumented
+gates remain explicit targets and never skip or report success.
 
 ## Strict parser checkpoint
 
@@ -61,9 +61,10 @@ commitments, substituted responses, ineligible RSA keys, truncation and trailing
 data. The implementation uses OpenSSL EVP for RS256 and OpenSSL BIGNUM for GQ;
 tests verify dynamic system `libcrypto` 3 linkage and reject `libssl` linkage.
 
-This layer is exercised directly against the immutable corpus. It is not yet
-wired through complete issuer policy or the production command, and it does not
-claim the maximum-size carrier, complete verifier or conformance gates.
+This layer is exercised directly against the immutable corpus and is wired
+through the issuer policy, direct carrier verifier and production command. The
+early maximum-size carrier subgate is complete; full corpus conformance and
+real-OpenSSH acceptance remain separate gates.
 
 ## Offline issuer-key checkpoint
 
@@ -76,9 +77,8 @@ signing JWKs and rejects duplicate JSON members or key IDs, private or unknown
 members, unsupported key roles, malformed canonical Base64url and trailing
 data. Unknown `kid` resolution fails closed.
 
-This checkpoint validates the offline file/key trust boundary independently.
-The issuer policy schema, complete token verifier, `config check`, and
-production command integration remain unfinished.
+The same offline file/key boundary is consumed by issuer policy,
+`config check`, initialization and the production verification command.
 
 ## Issuer evidence-policy checkpoint
 
@@ -148,9 +148,35 @@ input with explicit operational overrides. `--output` uses same-directory
 atomic 0600 publication, rejects unsafe targets and never overwrites without
 `--force`; forced replacement is limited to regular files. The initializer
 reuses the production typed parser, including offline static-JWKS validation.
-`test-cli` now covers exact bytes, useful policy, bounds, publication and safe
-failures. Sanitizer, fuzz, full conformance and real-OpenSSH targets remain
-later checkpoints and fail closed.
+`test-cli` covers exact bytes, useful policy, bounds, publication and safe
+failures.
+
+## Sanitizer and fuzz gates
+
+`make test-sanitize` builds separate ASan/UBSan parser and production-adapter
+test binaries, runs the unit and authenticated command paths, and replays the
+pinned parser/carrier/JWKS corpus. Linux retains AddressSanitizer leak
+detection. Darwin explicitly uses `ASAN_OPTIONS=detect_leaks=0` because that
+platform's AddressSanitizer does not provide LeakSanitizer; this does not make
+a Linux leak-check claim.
+
+Three Clang/libFuzzer harnesses cover the strict core JSON boundary, bounded
+OpenSSH certificate parser and CredBind token/Base64url/JWS parsing boundary.
+The smoke gate copies the small reviewed seed corpora into `.cache` before
+mutation, so test execution never rewrites committed inputs or adds generated
+corpus objects to the repository:
+
+```sh
+make test-sanitize
+make test-fuzz-smoke
+make fuzz TARGET=json DURATION=60
+make fuzz TARGET=certificate DURATION=60
+make fuzz TARGET=token DURATION=60
+```
+
+`FUZZ_CXX` may select another compatible Clang. The targets fail with a clear
+prerequisite error if its libFuzzer runtime is unavailable. Sanitizer and fuzz
+binaries remain ignored development artifacts under `.cache`.
 
 ## Conformance input
 
@@ -158,11 +184,13 @@ later checkpoints and fail closed.
 An offline reproduction may set `CREDBIND_FIXTURE_SOURCE` to an existing asset;
 its SHA-256 must still match.
 
-All unfinished complete CLI, protocol-conformance, sanitizer, fuzz and
-real-OpenSSH targets fail explicitly. The implemented integration, syslog and
-deadline targets are deterministic and offline; they do not close the real
-OpenSSH gate. This baseline makes no release, security, packaging or
-platform-support claim.
+Full protocol-scenario conformance and real-OpenSSH targets still fail
+explicitly. The implemented integration, syslog, deadline, sanitizer and fuzz
+smoke targets do not close either of those gates. In particular, the local
+presence of `sshd` is not a substitute for an isolated configured daemon, a
+fresh usable private-key/certificate carrier pair, the largest admitted GQ
+carrier, privilege boundary and measured authorization/denial evidence. This
+baseline makes no release, security, packaging or platform-support claim.
 
 The project is licensed under Apache License 2.0. Contributions must include a
 Developer Certificate of Origin sign-off.

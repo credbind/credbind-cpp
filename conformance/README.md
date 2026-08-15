@@ -53,8 +53,17 @@ bounds and zero authorization output on interruption.
 
 The reconciled R005 initializer is implemented and fixture-tested for exact
 deny-all bytes, useful-policy validation and atomic private publication, so
-`test-cli` is now implemented. This does not claim full corpus conformance:
-individual synchronous calls are not preempted mid-call, and real OpenSSH
-timing remains unfinished. `test-openssh`, sanitizer/fuzz and
-`make test-conformance` continue to fail closed; offline `test-integration`,
-`test-syslog` and `test-deadline` are implemented.
+`test-cli` is implemented. ASan/UBSan now replay unit, authenticated-command
+and pinned parser/carrier/JWKS coverage. The three Clang/libFuzzer smoke
+harnesses mutate copied JSON, OpenSSH-certificate and token corpora only under
+`.cache`.
+
+This does not claim full corpus-scenario conformance: the immutable release
+contains operations not yet interpreted as complete per-case C++ observables.
+Individual synchronous calls are not preempted mid-call, and a complete
+isolated real-OpenSSH gate still needs a fresh usable private-key/certificate
+pair (including the largest admitted GQ carrier), daemon configuration,
+privilege boundary and timing evidence. `make test-conformance` and
+`test-openssh` therefore continue to fail closed; offline `test-integration`,
+`test-syslog`, `test-deadline`, `test-sanitize` and `test-fuzz-smoke` are
+implemented.
