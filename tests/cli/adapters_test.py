@@ -21,6 +21,70 @@ def require(condition: bool, message: str) -> None:
         raise AssertionError(message)
 
 
+HELP_TOPICS = (
+    ((), b"""Usage:
+  credbind-ssh-authorized-keys version
+  credbind-ssh-authorized-keys config init --policy-input PATH [OPTIONS]
+  credbind-ssh-authorized-keys config init --deny-all [OPTIONS]
+  credbind-ssh-authorized-keys config check --config PATH
+  credbind-ssh-authorized-keys sshd-config render --config PATH --verifier PATH --command-user USER
+  credbind-ssh-authorized-keys verify --config PATH --user USER --key KEY --key-type TYPE
+
+Options:
+  -h, --help  Show help.
+"""),
+    (("version",), b"""Usage:
+  credbind-ssh-authorized-keys version
+
+Print version metadata as JSON.
+"""),
+    (("config",), b"""Usage:
+  credbind-ssh-authorized-keys config init --help
+  credbind-ssh-authorized-keys config check --help
+"""),
+    (("config", "init"), b"""Usage:
+  credbind-ssh-authorized-keys config init --policy-input PATH [OPTIONS]
+  credbind-ssh-authorized-keys config init --deny-all [OPTIONS]
+
+Options:
+  --policy-input PATH                         Initialize from explicit trust and account policy.
+  --deny-all                                  Initialize an explicit deny-all policy.
+  --clock-skew DURATION                       Set verifier clock skew.
+  --total-verification-deadline DURATION      Set the total verification deadline.
+  --max-token-bytes INTEGER                   Set the token byte limit.
+  --max-evidence-bytes INTEGER                Set the evidence byte limit.
+  --max-ssh-certificate-bytes INTEGER         Set the SSH certificate byte limit.
+  --max-offered-key-chars INTEGER             Set the offered-key character limit.
+  --max-authorized-keys-output-chars INTEGER  Set the authorized-keys output limit.
+  --issuer-key-cache-directory PATH           Set the issuer-key cache directory.
+  --issuer-key-cache-maximum-freshness DURATION
+                                               Set the issuer-key cache freshness limit.
+  --logging-facility FACILITY                 Set the local syslog facility.
+  --output PATH                               Atomically write instead of using stdout.
+  --force                                     Replace an existing regular output file.
+  -h, --help                                  Show help.
+"""),
+    (("config", "check"), b"""Usage:
+  credbind-ssh-authorized-keys config check --config PATH
+
+Validate configuration offline without changing it.
+"""),
+    (("sshd-config",), b"""Usage:
+  credbind-ssh-authorized-keys sshd-config render --help
+"""),
+    (("sshd-config", "render"), b"""Usage:
+  credbind-ssh-authorized-keys sshd-config render --config PATH --verifier PATH --command-user USER
+
+Render the minimal OpenSSH AuthorizedKeysCommand fragment without installing it.
+"""),
+    (("verify",), b"""Usage:
+  credbind-ssh-authorized-keys verify --config PATH --user USER --key KEY --key-type TYPE
+
+Verify one OpenSSH certificate request. Denial produces empty stdout and exit status 0.
+"""),
+)
+
+
 def sample_config() -> bytes:
     value = {
         "version": 1,
@@ -99,6 +163,13 @@ def main() -> int:
         config = root / "verifier.json"
         config.write_bytes(sample_config())
         config.chmod(0o600)
+
+        for prefix, expected_help in HELP_TOPICS:
+            for help_flag in ("-h", "--help"):
+                result = invoke(binary, *prefix, help_flag)
+                require((result.returncode, result.stdout, result.stderr) ==
+                        (0, expected_help, b""),
+                        f"exact side-effect-free help for {prefix!r} {help_flag}")
 
         result = invoke(binary, "config", "check", "--config", str(config))
         require((result.returncode, result.stdout, result.stderr) ==

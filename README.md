@@ -151,6 +151,12 @@ reuses the production typed parser, including offline static-JWKS validation.
 `test-cli` covers exact bytes, useful policy, bounds, publication and safe
 failures.
 
+The command root and every implemented subcommand support both `-h` and
+`--help`. Help exits successfully, writes only its stable usage text to stdout,
+and is handled before configuration access, verification, clock use or audit
+emission. Go and C++ emit byte-identical help for their shared
+`credbind-ssh-authorized-keys` surface.
+
 ## Sanitizer and fuzz gates
 
 `make test-sanitize` builds separate ASan/UBSan parser and production-adapter

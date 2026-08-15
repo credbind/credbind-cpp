@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <ostream>
 #include <string>
 #include <unordered_set>
@@ -24,6 +25,101 @@ namespace {
 constexpr std::uint64_t kNanosecondsPerMillisecond = 1000000U;
 constexpr std::uint64_t kMaximumVerificationNanoseconds = 10U * 1000U *
                                                            kNanosecondsPerMillisecond;
+
+constexpr std::string_view kRootHelp = R"(Usage:
+  credbind-ssh-authorized-keys version
+  credbind-ssh-authorized-keys config init --policy-input PATH [OPTIONS]
+  credbind-ssh-authorized-keys config init --deny-all [OPTIONS]
+  credbind-ssh-authorized-keys config check --config PATH
+  credbind-ssh-authorized-keys sshd-config render --config PATH --verifier PATH --command-user USER
+  credbind-ssh-authorized-keys verify --config PATH --user USER --key KEY --key-type TYPE
+
+Options:
+  -h, --help  Show help.
+)";
+
+constexpr std::string_view kVersionHelp = R"(Usage:
+  credbind-ssh-authorized-keys version
+
+Print version metadata as JSON.
+)";
+
+constexpr std::string_view kConfigHelp = R"(Usage:
+  credbind-ssh-authorized-keys config init --help
+  credbind-ssh-authorized-keys config check --help
+)";
+
+constexpr std::string_view kConfigInitHelp = R"(Usage:
+  credbind-ssh-authorized-keys config init --policy-input PATH [OPTIONS]
+  credbind-ssh-authorized-keys config init --deny-all [OPTIONS]
+
+Options:
+  --policy-input PATH                         Initialize from explicit trust and account policy.
+  --deny-all                                  Initialize an explicit deny-all policy.
+  --clock-skew DURATION                       Set verifier clock skew.
+  --total-verification-deadline DURATION      Set the total verification deadline.
+  --max-token-bytes INTEGER                   Set the token byte limit.
+  --max-evidence-bytes INTEGER                Set the evidence byte limit.
+  --max-ssh-certificate-bytes INTEGER         Set the SSH certificate byte limit.
+  --max-offered-key-chars INTEGER             Set the offered-key character limit.
+  --max-authorized-keys-output-chars INTEGER  Set the authorized-keys output limit.
+  --issuer-key-cache-directory PATH           Set the issuer-key cache directory.
+  --issuer-key-cache-maximum-freshness DURATION
+                                               Set the issuer-key cache freshness limit.
+  --logging-facility FACILITY                 Set the local syslog facility.
+  --output PATH                               Atomically write instead of using stdout.
+  --force                                     Replace an existing regular output file.
+  -h, --help                                  Show help.
+)";
+
+constexpr std::string_view kConfigCheckHelp = R"(Usage:
+  credbind-ssh-authorized-keys config check --config PATH
+
+Validate configuration offline without changing it.
+)";
+
+constexpr std::string_view kSSHDConfigHelp = R"(Usage:
+  credbind-ssh-authorized-keys sshd-config render --help
+)";
+
+constexpr std::string_view kSSHDConfigRenderHelp = R"(Usage:
+  credbind-ssh-authorized-keys sshd-config render --config PATH --verifier PATH --command-user USER
+
+Render the minimal OpenSSH AuthorizedKeysCommand fragment without installing it.
+)";
+
+constexpr std::string_view kVerifyHelp = R"(Usage:
+  credbind-ssh-authorized-keys verify --config PATH --user USER --key KEY --key-type TYPE
+
+Verify one OpenSSH certificate request. Denial produces empty stdout and exit status 0.
+)";
+
+bool help_flag(std::string_view value) {
+    return value == "-h" || value == "--help";
+}
+
+std::optional<std::string_view> help_text(
+    const std::vector<std::string_view>& arguments) {
+    if (arguments.size() == 1U && help_flag(arguments[0])) return kRootHelp;
+    if (arguments.size() == 2U && help_flag(arguments[1])) {
+        if (arguments[0] == "version") return kVersionHelp;
+        if (arguments[0] == "config") return kConfigHelp;
+        if (arguments[0] == "sshd-config") return kSSHDConfigHelp;
+        if (arguments[0] == "verify") return kVerifyHelp;
+    }
+    if (arguments.size() == 3U && help_flag(arguments[2])) {
+        if (arguments[0] == "config" && arguments[1] == "init") {
+            return kConfigInitHelp;
+        }
+        if (arguments[0] == "config" && arguments[1] == "check") {
+            return kConfigCheckHelp;
+        }
+        if (arguments[0] == "sshd-config" && arguments[1] == "render") {
+            return kSSHDConfigRenderHelp;
+        }
+    }
+    return std::nullopt;
+}
 
 ParseError error(ParseErrorKind kind, std::string message) {
     return ParseError{kind, std::move(message)};
@@ -338,6 +434,12 @@ bool SystemClock::cancellation_requested() noexcept {
 
 int run_dispatch(const std::vector<std::string_view>& arguments, std::ostream& output,
                  std::ostream& diagnostics, audit::Logger& logger, Clock& clock) {
+    if (const auto help = help_text(arguments); help) {
+        const auto written = output.rdbuf()->sputn(
+            help->data(), static_cast<std::streamsize>(help->size()));
+        return written == static_cast<std::streamsize>(help->size())
+                   ? 0 : fail(diagnostics, ParseErrorKind::internal_error);
+    }
     if (arguments.empty()) return fail(diagnostics, ParseErrorKind::malformed_input);
     if (arguments[0] == "verify") {
         return run_verify(arguments, output, logger, clock);
