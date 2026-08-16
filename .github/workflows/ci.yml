@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cpp-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: Ubuntu 24.04 / ${{ matrix.compiler }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+    steps:
+      - name: Check out C++ verifier
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          path: credbind-cpp
+      - name: Check out pinned Go carrier generator
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          repository: credbind/credbind-go
+          ref: 8ac043f8b8815f832c4818dd38054e0816817055
+          path: credbind-go
+      - name: Install Go 1.26.5
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: 1.26.5
+          cache-dependency-path: credbind-go/go.sum
+      - name: Install system prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes clang libssl-dev openssh-client openssh-server pkg-config
+          sudo install -d -o root -g root -m 0755 /run/sshd
+      - name: Run strict deterministic and sanitizer gates
+        working-directory: credbind-cpp
+        env:
+          CXX: ${{ matrix.compiler }}
+        run: make check test-readme test-sanitize
+      - name: Run Clang fuzz smoke
+        if: matrix.compiler == 'clang++'
+        working-directory: credbind-cpp
+        env:
+          CXX: clang++
+          FUZZ_CXX: clang++
+        run: make test-fuzz-smoke
+      - name: Run production AuthorizedKeysCommand gate
+        if: matrix.compiler == 'g++'
+        working-directory: credbind-cpp
+        run: |
+          sudo install -o root -g root -m 0755 dist/linux-amd64/credbind-ssh-authorized-keys /usr/local/bin/credbind-ssh-authorized-keys-test
+          trap 'sudo rm -f /usr/local/bin/credbind-ssh-authorized-keys-test' EXIT
+          make test-openssh OPENSSH_TEST_BINARY=/usr/local/bin/credbind-ssh-authorized-keys-test
+
+  macos:
+    name: macOS 15 arm64 / Apple Clang
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - name: Check out C++ verifier
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          path: credbind-cpp
+      - name: Check out pinned Go carrier generator
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          repository: credbind/credbind-go
+          ref: 8ac043f8b8815f832c4818dd38054e0816817055
+          path: credbind-go
+      - name: Install Go 1.26.5
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: 1.26.5
+          cache-dependency-path: credbind-go/go.sum
+      - name: Select Homebrew OpenSSL 3
+        run: echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig" >> "$GITHUB_ENV"
+      - name: Run strict, sanitizer and fuzz gates
+        working-directory: credbind-cpp
+        run: make check test-readme test-sanitize test-fuzz-smoke
+      - name: Run production AuthorizedKeysCommand gate
+        working-directory: credbind-cpp
+        run: |
+          sudo install -o root -g wheel -m 0755 dist/darwin-arm64/credbind-ssh-authorized-keys /usr/local/bin/credbind-ssh-authorized-keys-test
+          trap 'sudo rm -f /usr/local/bin/credbind-ssh-authorized-keys-test' EXIT
+          make test-openssh OPENSSH_TEST_BINARY=/usr/local/bin/credbind-ssh-authorized-keys-test
