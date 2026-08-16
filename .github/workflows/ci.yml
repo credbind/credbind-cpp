@@ -61,12 +61,12 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           path: credbind-cpp
-      - name: Install and select Homebrew OpenSSL 3 and LLVM
+      - name: Install and select Homebrew OpenSSL 3, LLVM and LLD
         run: |
-          brew install llvm
+          brew install llvm lld
           echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig" >> "$GITHUB_ENV"
           echo "FUZZ_CXX=$(brew --prefix llvm)/bin/clang++" >> "$GITHUB_ENV"
-          echo "FUZZ_LDFLAGS=-fuse-ld=lld" >> "$GITHUB_ENV"
+          echo "FUZZ_LDFLAGS=-fuse-ld=$(brew --prefix lld)/bin/ld64.lld" >> "$GITHUB_ENV"
           echo "LLVM_SYMBOLIZER=$(brew --prefix llvm)/bin/llvm-symbolizer" >> "$GITHUB_ENV"
       - name: Fetch and verify the pinned conformance corpus
         working-directory: credbind-cpp
