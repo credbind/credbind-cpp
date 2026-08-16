@@ -155,6 +155,13 @@ void test_audit() {
         "\"binding_profile\":\"oidc-nonce-v1\","
         "\"evidence_profile\":\"standard-jws-v1\",\"caller_algorithm\":\"ES256\"}",
         "allow exact payload");
+    if (const char* observable = std::getenv("CREDBIND_AUDIT_OBSERVABLE");
+        observable != nullptr) {
+        std::ofstream output(observable, std::ios::binary | std::ios::trunc);
+        require(output.is_open(), "open audit observable");
+        output << serialized->payload << '\n' << "info\n";
+        require(output.good(), "write audit observable");
+    }
     conformance_asserted("audit-event-go-cpp-equivalence");
 
     audit::VerificationEvent cancelled;

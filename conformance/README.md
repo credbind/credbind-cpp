@@ -65,7 +65,9 @@ observable. Cases owned exclusively by Go acquisition, provider-helper, OAuth
 callback, discovery-cache or client certificate-creation capabilities are
 emitted as explicit plan-authoritative dispositions; unknown cases fail. The
 normalized report includes every case identifier and the pinned artifact and
-manifest digests.
+manifest digests. It also carries the actual C++ audit payload and severity for
+the audit-equivalence row. The independent planning-repository comparator owns
+the final Go/C++ byte comparison; the C++ report does not use Go as an oracle.
 
 The five just-over-limit rows are compositional: each exact token, evidence,
 certificate, offered-key or output size guard is exercised at its owning C++

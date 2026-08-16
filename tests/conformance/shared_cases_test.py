@@ -85,9 +85,12 @@ def load(path: Path) -> dict:
         return json.load(handle)
 
 
-def invoke_adapter(binary: Path, case_id: str, *arguments: str) -> None:
+def invoke_adapter(binary: Path, case_id: str, *arguments: str,
+                   audit_observable: Path | None = None) -> None:
     environment = dict(os.environ)
     environment["CREDBIND_CONFORMANCE_CASE"] = case_id
+    if audit_observable is not None:
+        environment["CREDBIND_AUDIT_OBSERVABLE"] = str(audit_observable)
     result = subprocess.run(
         [str(binary), *arguments], stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
@@ -387,13 +390,22 @@ def main() -> None:
     # Select each adapter case independently. The C++ test process refuses a
     # selector unless the corresponding exact production-boundary assertion
     # actually executed.
-    for case_id in sorted(ADAPTER_CASES | RESOURCE_CASES):
-        invoke_adapter(
-            args.adapter_binary, case_id,
-            str(ROOT / "tests/fixtures/issuer-jwks.json"),
-            str(CORPUS / "vectors/ssh-carrier-p256.json"),
-            str(CORPUS / "keys/issuer-jwks.json"),
-        )
+    audit_payload = ""
+    audit_severity = ""
+    with tempfile.TemporaryDirectory(prefix="credbind-cpp-observables-") as directory:
+        observable = Path(directory) / "audit.txt"
+        for case_id in sorted(ADAPTER_CASES | RESOURCE_CASES):
+            invoke_adapter(
+                args.adapter_binary, case_id,
+                str(ROOT / "tests/fixtures/issuer-jwks.json"),
+                str(CORPUS / "vectors/ssh-carrier-p256.json"),
+                str(CORPUS / "keys/issuer-jwks.json"),
+                audit_observable=(observable if case_id == "audit-event-go-cpp-equivalence" else None),
+            )
+        lines = observable.read_text(encoding="utf-8").splitlines()
+        if len(lines) != 2:
+            raise RuntimeError("C++ audit observable is incomplete")
+        audit_payload, audit_severity = lines
 
     results = []
     with tempfile.TemporaryDirectory(prefix="credbind-conformance-") as directory:
@@ -420,7 +432,9 @@ def main() -> None:
             if "stdout_octets" in case["expected"]:
                 observed["stdout_octets"] = case["expected"]["stdout_octets"]
             if case_id == "audit-event-go-cpp-equivalence":
-                observed["cross_language_comparison"] = "pending-go-result"
+                observed["audit_payload"] = audit_payload
+                observed["audit_severity"] = audit_severity
+                observed["cross_language_comparison"] = "pending-shared-comparator"
             results.append(observed)
 
     applicable = sum(item["applicability"] == "applicable" for item in results)
