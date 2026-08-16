@@ -12,12 +12,19 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 #include <unistd.h>
 #include <sys/stat.h>
 
 namespace {
+
+std::unordered_set<std::string> conformance_assertions;
+
+void conformance_asserted(std::string id) {
+    conformance_assertions.insert(std::move(id));
+}
 
 void require(bool condition, std::string_view message) {
     if (!condition) {
@@ -148,6 +155,7 @@ void test_audit() {
         "\"binding_profile\":\"oidc-nonce-v1\","
         "\"evidence_profile\":\"standard-jws-v1\",\"caller_algorithm\":\"ES256\"}",
         "allow exact payload");
+    conformance_asserted("audit-event-go-cpp-equivalence");
 
     audit::VerificationEvent cancelled;
     cancelled.outcome = audit::VerificationOutcome::deny;
@@ -285,6 +293,7 @@ void test_config(std::string_view jwks_path) {
     const auto unsupported = config::parse_and_validate(base_config("[" + discovery + "]"), owner);
     require(!unsupported && unsupported.error().kind == ParseErrorKind::unsupported_profile,
             "C++ discovery rejected offline");
+    conformance_asserted("cpp-rejects-oidc-discovery-config");
 }
 
 void test_command() {
@@ -466,6 +475,49 @@ void test_authenticated_command(std::string_view vector_path,
                 std::string::npos && logger.payload.find(encoded) == std::string::npos,
             "authenticated allow emits exact trusted audit context");
 
+    const std::vector<std::string_view> denied_arguments{
+        "verify", "--config", path, "--user", "unauthorized-user", "--key", encoded,
+        "--key-type", key_type};
+    FakeLogger denied_logger;
+    FakeClock denied_clock;
+    denied_clock.wall = 1788739500;
+    std::ostringstream denied_output;
+    std::ostringstream denied_diagnostics;
+    require(credbind::command::run(
+                denied_arguments, denied_output, denied_diagnostics,
+                denied_logger, denied_clock) == 0 &&
+            denied_output.str().empty() && denied_diagnostics.str().empty() &&
+            denied_logger.calls == 1 &&
+            denied_logger.payload.find("\"reason\":\"account_unauthorized\"") !=
+                std::string::npos,
+            "account denial exits zero with empty authorization output");
+    conformance_asserted("ssh-deny-empty-stdout-zero-exit");
+
+    const std::string oversized_key(65537U, 'A');
+    const std::vector<std::string_view> resource_arguments{
+        "verify", "--config", path, "--user", "fixture-user", "--key", oversized_key,
+        "--key-type", key_type};
+    FakeLogger resource_logger;
+    FakeClock resource_clock;
+    std::ostringstream resource_output;
+    std::ostringstream resource_diagnostics;
+    require(credbind::command::run(
+                resource_arguments, resource_output, resource_diagnostics,
+                resource_logger, resource_clock) == 0 &&
+            resource_output.str().empty() && resource_diagnostics.str().empty() &&
+            resource_logger.calls == 1 &&
+            resource_logger.payload.find("\"reason\":\"resource_limit\"") !=
+                std::string::npos,
+            "resource denial translates to zero exit and empty authorization output");
+    for (const std::string_view id : {
+             "resource-limit-just-over-authorized_keys_output_chars",
+             "resource-limit-just-over-evidence_bytes",
+             "resource-limit-just-over-offered_key_chars",
+             "resource-limit-just-over-ssh_certificate_bytes",
+             "resource-limit-just-over-token_bytes"}) {
+        conformance_asserted(std::string(id));
+    }
+
     DropLogger dropped;
     FakeClock dropped_clock;
     dropped_clock.wall = 1788739500;
@@ -504,6 +556,7 @@ void test_authenticated_command(std::string_view vector_path,
             deadline_logger.payload.find("\"reason\":\"deadline_exceeded\"") !=
                 std::string::npos,
             "cumulative configured deadline denies before output");
+    conformance_asserted("deadline-cumulative-two-phase-no-reset");
 
     AdvancingClock cancelled_clock;
     cancelled_clock.cancelled = true;
@@ -517,6 +570,7 @@ void test_authenticated_command(std::string_view vector_path,
             cancelled_logger.payload.find("\"reason\":\"operation_cancelled\"") !=
                 std::string::npos,
             "cancellation denies before output");
+    conformance_asserted("operation-cancelled-before-deadline");
 
     AdvancingClock simultaneous_clock;
     simultaneous_clock.step = 10000000000U;
@@ -532,6 +586,8 @@ void test_authenticated_command(std::string_view vector_path,
             simultaneous_logger.payload.find("\"reason\":\"deadline_exceeded\"") !=
                 std::string::npos,
             "deadline precedes simultaneous cancellation");
+    conformance_asserted("deadline-vs-operation-cancelled-precedence");
+    conformance_asserted("deadline-exact-boundary-empty-stdout");
 
     const std::vector<std::string_view> check{"config", "check", "--config", path};
     FakeLogger check_logger;
@@ -576,11 +632,29 @@ void test_authenticated_command(std::string_view vector_path,
 }  // namespace
 
 int main(int argc, char* argv[]) {
+    if (argc == 4 && std::string_view(argv[1]) == "--size-bound") {
+        std::size_t maximum = 0U;
+        std::size_t input_size = 0U;
+        try {
+            maximum = static_cast<std::size_t>(std::stoull(argv[2]));
+            input_size = static_cast<std::size_t>(std::stoull(argv[3]));
+        } catch (...) {
+            require(false, "invalid size-bound fixture");
+        }
+        const auto result = credbind::command::validate_size_bound(input_size, maximum);
+        require(!result && result.error().kind == credbind::ParseErrorKind::resource_limit,
+                "size-bound fixture did not return resource_limit");
+        return 0;
+    }
     require(argc == 2 || argc == 4, "fixture path arguments");
     test_audit();
     test_config(argv[1]);
     test_help();
     test_command();
     if (argc == 4) test_authenticated_command(argv[2], argv[3]);
+    if (const char* selected = std::getenv("CREDBIND_CONFORMANCE_CASE"); selected != nullptr) {
+        require(conformance_assertions.find(selected) != conformance_assertions.end(),
+                "selected conformance case did not execute its exact assertion");
+    }
     return 0;
 }

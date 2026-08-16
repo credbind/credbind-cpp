@@ -69,7 +69,7 @@ $(BINARY): src/main.cpp src/command.hpp src/config.hpp src/syslog_logger.hpp $(A
 fixtures:
 	$(PYTHON) scripts/fixtures.py fetch
 
-test: test-unit test-fixtures test-cli test-integration test-syslog test-deadline
+test: test-unit test-fixtures test-conformance test-cli test-integration test-syslog test-deadline
 
 test-unit: dependencies-check crypto-check build $(TEST_BINARY) $(ADAPTER_TEST_BINARY)
 	$(TEST_BINARY)
@@ -80,6 +80,10 @@ test-unit: dependencies-check crypto-check build $(TEST_BINARY) $(ADAPTER_TEST_B
 test-fixtures: dependencies-check crypto-check $(TEST_BINARY)
 	$(PYTHON) scripts/fixtures.py verify
 	$(PYTHON) tests/fixtures/parser_vectors_test.py "$(TEST_BINARY)"
+
+test-conformance: dependencies-check crypto-check $(TEST_BINARY) $(ADAPTER_TEST_BINARY)
+	$(PYTHON) scripts/fixtures.py verify
+	$(PYTHON) tests/conformance/shared_cases_test.py "$(TEST_BINARY)" "$(ADAPTER_TEST_BINARY)"
 
 $(ADAPTER_TEST_BINARY): tests/unit/adapters_test.cpp src/command.hpp src/config.hpp src/syslog_logger.hpp $(ADAPTER_SOURCES) $(THIRD_PARTY_HEADERS) Makefile
 	@mkdir -p $(@D)
@@ -126,6 +130,8 @@ test-sanitize: dependencies-check crypto-check fixtures $(SANITIZE_TEST_BINARY) 
 		"$(CURDIR)/.cache/conformance/v1.0.0-rc.1/corpus/credbind-ssh-v1-conformance-v1.0.0-rc.1/vectors/ssh-carrier-p256.json" \
 		"$(CURDIR)/.cache/conformance/v1.0.0-rc.1/corpus/credbind-ssh-v1-conformance-v1.0.0-rc.1/keys/issuer-jwks.json"
 	$(SANITIZER_ENV) $(PYTHON) tests/fixtures/parser_vectors_test.py "$(SANITIZE_TEST_BINARY)"
+	$(SANITIZER_ENV) $(PYTHON) tests/conformance/shared_cases_test.py \
+		"$(SANITIZE_TEST_BINARY)" "$(SANITIZE_ADAPTER_TEST_BINARY)"
 
 $(FUZZ_DIR)/json: fuzz/json_fuzz.cpp src/strict_json.cpp src/strict_json.hpp src/parse_error.hpp $(THIRD_PARTY_HEADERS) Makefile
 	@mkdir -p $(@D)
@@ -187,7 +193,7 @@ verify-binary: build
 	@test "$(TARGET)" = "$(HOST_SYSTEM)-$(HOST_ARCH)" || { echo "verify-binary requires the host target" >&2; exit 1; }
 	$(PYTHON) scripts/verify_binary.py --binary "$(BINARY)" --target "$(TARGET)" --version "$(VERSION)" --revision "$(REVISION)" --source-date-epoch "$(SOURCE_DATE_EPOCH)"
 
-test-conformance test-openssh:
+test-openssh:
 	@$(MAKE) --no-print-directory _not-implemented TARGET_NAME=$@
 
 _not-implemented:

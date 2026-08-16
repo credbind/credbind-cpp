@@ -824,6 +824,15 @@ bool account_rule_matches(const AccountRule& rule, const CoreResult& core,
 
 }  // namespace
 
+tl::expected<void, ParseError> validate_evidence_result_digest(
+    const crypto::Sha256Digest& expected, const crypto::Sha256Digest& verified) {
+    if (!digest_equal(expected, verified)) {
+        return tl::make_unexpected(error(ParseErrorKind::evidence_result_mismatch,
+                                         "issuer evidence digest does not match"));
+    }
+    return {};
+}
+
 CoreVerificationResult verify_token(std::string_view token, const CorePolicy& policy,
                                     const jwks::StaticJwks& keys,
                                     std::int64_t verification_time_unix) {
@@ -871,10 +880,12 @@ CoreVerificationResult verify_token(std::string_view token, const CorePolicy& po
                                   verification_time_unix},
         policy.issuer_policy, keys);
     if (!evidence_result) return tl::make_unexpected(evidence_result.error());
+    const auto digest_result = validate_evidence_result_digest(
+        *expected_digest, evidence_result->verified_evidence_digest);
     if (evidence_result->issuer.empty() || evidence_result->issuer_key_id.empty() ||
         evidence_result->issuer != policy.issuer_policy.issuer ||
         evidence_result->binding_profile != cic->binding_profile ||
-        !digest_equal(*expected_digest, evidence_result->verified_evidence_digest)) {
+        !digest_result) {
         return tl::make_unexpected(error(ParseErrorKind::evidence_result_mismatch,
                                          "issuer evidence result is inconsistent"));
     }

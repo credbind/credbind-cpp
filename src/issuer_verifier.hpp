@@ -70,6 +70,15 @@ struct VerificationResult {
 
 using Result = tl::expected<VerificationResult, ParseError>;
 
+using ClaimValidationResult = tl::expected<std::int64_t, ParseError>;
+
+// Validate claims only after an issuer-signature boundary has authenticated them.
+// This is also the language-neutral seam used by conformance mutations that
+// require re-signed synthetic credentials, whose private keys are deliberately
+// absent from the published corpus.
+[[nodiscard]] ClaimValidationResult validate_authenticated_claims(
+    const VerificationInput& input, const Policy& policy, const Claims& claims);
+
 [[nodiscard]] Result verify(const VerificationInput& input, const Policy& policy,
                             const jwks::StaticJwks& keys);
 

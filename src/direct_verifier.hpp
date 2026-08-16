@@ -54,6 +54,9 @@ struct CoreResult {
 
 using CoreVerificationResult = tl::expected<CoreResult, ParseError>;
 
+[[nodiscard]] tl::expected<void, ParseError> validate_evidence_result_digest(
+    const crypto::Sha256Digest& expected, const crypto::Sha256Digest& verified);
+
 [[nodiscard]] CoreVerificationResult verify_token(std::string_view token,
                                                    const CorePolicy& policy,
                                                    const jwks::StaticJwks& keys,

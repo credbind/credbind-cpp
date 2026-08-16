@@ -595,6 +595,15 @@ tl::expected<crypto::Sha256Digest, ParseError> evidence_digest(
 
 }  // namespace
 
+ClaimValidationResult validate_authenticated_claims(
+    const VerificationInput& input, const Policy& policy, const Claims& claims) {
+    const auto policy_result = validate_policy(input, policy);
+    if (!policy_result) {
+        return tl::make_unexpected(policy_result.error());
+    }
+    return validate_claims(input, policy, claims);
+}
+
 Result verify(const VerificationInput& input, const Policy& policy,
               const jwks::StaticJwks& keys) {
     if (input.evidence_representation.size() > kMaximumEvidenceBytes) {

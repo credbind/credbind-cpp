@@ -58,12 +58,26 @@ and pinned parser/carrier/JWKS coverage. The three Clang/libFuzzer smoke
 harnesses mutate copied JSON, OpenSSH-certificate and token corpora only under
 `.cache`.
 
-This does not claim full corpus-scenario conformance: the immutable release
-contains operations not yet interpreted as complete per-case C++ observables.
+`make test-conformance` interprets all 72 immutable cases. Each C++-applicable
+case drives the production command or the narrow internal boundary named by
+the case and compares the stable category plus any declared exit and stdout
+observable. Cases owned exclusively by Go acquisition, provider-helper, OAuth
+callback, discovery-cache or client certificate-creation capabilities are
+emitted as explicit plan-authoritative dispositions; unknown cases fail. The
+normalized report includes every case identifier and the pinned artifact and
+manifest digests.
+
+The five just-over-limit rows are compositional: each exact token, evidence,
+certificate, offered-key or output size guard is exercised at its owning C++
+boundary, and each row is paired with the common production command
+translation assertion for `resource_limit`, zero exit, empty output and the
+bounded audit reason. They are not represented as five independently signed
+oversized SSH carriers.
+
 Individual synchronous calls are not preempted mid-call, and a complete
 isolated real-OpenSSH gate still needs a fresh usable private-key/certificate
 pair (including the largest admitted GQ carrier), daemon configuration,
-privilege boundary and timing evidence. `make test-conformance` and
-`test-openssh` therefore continue to fail closed; offline `test-integration`,
+privilege boundary and timing evidence. `test-openssh` therefore continues to
+fail closed; offline `test-conformance`, `test-integration`,
 `test-syslog`, `test-deadline`, `test-sanitize` and `test-fuzz-smoke` are
 implemented.

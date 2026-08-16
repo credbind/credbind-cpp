@@ -309,7 +309,8 @@ int run_verify(const std::vector<std::string_view>& args, std::ostream& output,
         return deny_verify(requested_user, state.reason, configuration->facility,
                            started, logger, clock);
     }
-    if (encoded_key.size() > configuration->resource_limits.max_offered_key_chars) {
+    if (!validate_size_bound(encoded_key.size(),
+                             configuration->resource_limits.max_offered_key_chars)) {
         return deny_verify(requested_user, ParseErrorKind::resource_limit,
                            configuration->facility, started, logger, clock);
     }
@@ -382,7 +383,8 @@ int run_verify(const std::vector<std::string_view>& args, std::ostream& output,
         return deny_verify(requested_user, state.reason, configuration->facility,
                            started, logger, clock, &policy, &selected.second.core);
     }
-    if (line.size() > configuration->resource_limits.max_authorized_keys_output_chars) {
+    if (!validate_size_bound(
+            line.size(), configuration->resource_limits.max_authorized_keys_output_chars)) {
         return deny_verify(requested_user, ParseErrorKind::resource_limit,
                            configuration->facility, started, logger, clock,
                            &policy, &selected.second.core);
@@ -430,6 +432,15 @@ std::uint64_t SystemClock::monotonic_nanoseconds() noexcept {
 
 bool SystemClock::cancellation_requested() noexcept {
     return cancellation_ != nullptr && *cancellation_ != 0;
+}
+
+tl::expected<void, ParseError> validate_size_bound(
+    std::size_t input_size, std::size_t configured_maximum) {
+    if (configured_maximum == 0U || input_size > configured_maximum) {
+        return tl::make_unexpected(ParseError{
+            ParseErrorKind::resource_limit, "value exceeds configured size bound"});
+    }
+    return {};
 }
 
 int run_dispatch(const std::vector<std::string_view>& arguments, std::ostream& output,

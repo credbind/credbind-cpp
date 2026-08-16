@@ -5,11 +5,14 @@
 
 #include "syslog_logger.hpp"
 
+#include <cstddef>
 #include <csignal>
 #include <cstdint>
 #include <iosfwd>
 #include <string_view>
 #include <vector>
+
+#include <tl/expected.hpp>
 
 namespace credbind::command {
 
@@ -31,6 +34,9 @@ class SystemClock final : public Clock {
   private:
     const volatile std::sig_atomic_t* cancellation_;
 };
+
+[[nodiscard]] tl::expected<void, ParseError> validate_size_bound(
+    std::size_t input_size, std::size_t configured_maximum);
 
 [[nodiscard]] int run(const std::vector<std::string_view>& arguments,
                       std::ostream& output, std::ostream& diagnostics,

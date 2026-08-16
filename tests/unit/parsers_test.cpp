@@ -489,6 +489,95 @@ void verify_issuer_frame(const std::string& frame) {
     expect_error(result, issuer_expected_error(mode), "issuer-verifier rejection");
 }
 
+void verify_authenticated_claims_frame(const std::string& frame) {
+    CryptoFrameReader reader(frame);
+    char mode = '\0';
+    require(reader.byte(mode), "invalid authenticated-claims frame");
+    require(mode == 'P' || mode == 'B' || mode == 'C' || mode == 'N' || mode == 'X',
+            "unknown authenticated-claims expectation");
+    std::vector<std::string_view> fields;
+    for (std::size_t index = 0U; index < 7U; ++index) {
+        std::string_view field;
+        require(reader.field(field), "truncated authenticated-claims frame");
+        fields.push_back(field);
+    }
+    require(reader.empty(), "trailing authenticated-claims frame");
+    std::int64_t verification_time = 0;
+    const auto parsed_time = std::from_chars(fields[5].data(),
+                                             fields[5].data() + fields[5].size(),
+                                             verification_time);
+    require(parsed_time.ec == std::errc{} &&
+                parsed_time.ptr == fields[5].data() + fields[5].size(),
+            "invalid authenticated-claims time");
+    const auto object = nlohmann::json::parse(fields[6], nullptr, false);
+    require(object.is_object(), "authenticated claims must be an object");
+    credbind::issuer::Claims claims;
+    for (const auto& item : object.items()) {
+        claims.emplace(item.key(), item.value());
+    }
+    credbind::issuer::Policy policy{
+        std::string(fields[2]), {std::string(fields[3])},
+        fields[4].empty() ? std::unordered_set<std::string>{}
+                          : std::unordered_set<std::string>{std::string(fields[4])},
+        {"RS256"}, {credbind::issuer::kStandardEvidence},
+        {std::string(fields[0])}, false, 0, 30, {}, {}};
+    const auto result = credbind::issuer::validate_authenticated_claims(
+        credbind::issuer::VerificationInput{
+            credbind::issuer::kStandardEvidence, std::string(fields[0]),
+            std::string(fields[1]), "", {}, verification_time},
+        policy, claims);
+    if (mode == 'P') {
+        require(static_cast<bool>(result), "authenticated claims were rejected");
+        return;
+    }
+    const auto expected = mode == 'B' ? credbind::ParseErrorKind::binding_invalid
+                          : mode == 'C' ? credbind::ParseErrorKind::issuer_claims_invalid
+                          : mode == 'N' ? credbind::ParseErrorKind::credential_not_yet_valid
+                                        : credbind::ParseErrorKind::credential_expired;
+    expect_error(result, expected, "authenticated-claims rejection");
+}
+
+void verify_evidence_digest_mismatch() {
+    credbind::crypto::Sha256Digest expected{};
+    credbind::crypto::Sha256Digest verified{};
+    verified.back() = 1U;
+    expect_error(credbind::direct::validate_evidence_result_digest(expected, verified),
+                 credbind::ParseErrorKind::evidence_result_mismatch,
+                 "evidence-result digest mismatch");
+}
+
+void verify_resource_limit(std::string_view name, std::size_t maximum,
+                           std::size_t input_size) {
+    require(input_size == maximum + 1U, "resource fixture is not just over its bound");
+    if (name == "token_bytes") {
+        credbind::direct::CorePolicy policy;
+        policy.limits.max_token_bytes = maximum;
+        policy.limits.max_evidence_bytes = 16384U;
+        const auto result = credbind::direct::verify_token(
+            std::string(input_size, 'x'), policy, credbind::jwks::StaticJwks{}, 0);
+        expect_error(result, credbind::ParseErrorKind::resource_limit,
+                     "token byte resource limit");
+        return;
+    }
+    if (name == "evidence_bytes") {
+        const std::string evidence((input_size * 4U + 2U) / 3U, 'A');
+        const auto result = credbind::base64url::decode(evidence, maximum);
+        expect_error(result, credbind::ParseErrorKind::resource_limit,
+                     "evidence byte resource limit");
+        return;
+    }
+    if (name == "ssh_certificate_bytes") {
+        expect_error(
+            credbind::openssh::parse_certificate(
+                std::string(input_size, '\0'),
+                credbind::openssh::Limits{maximum, 8U, 16U, 16U, 32768U}),
+            credbind::ParseErrorKind::resource_limit,
+            "SSH certificate byte resource limit");
+        return;
+    }
+    require(false, "unknown internal resource-limit fixture");
+}
+
 std::unordered_set<std::string> split_set(std::string_view value) {
     std::unordered_set<std::string> result;
     std::size_t offset = 0U;
@@ -700,7 +789,9 @@ int main(int argc, char** argv) {
     test_core_envelope();
     test_openssh_certificate();
     test_jwks_policy();
-    if (argc == 2) {
+    if (argc == 2 && std::string_view(argv[1]) == "--digest-mismatch") {
+        verify_evidence_digest_mismatch();
+    } else if (argc == 2) {
         const auto parsed = credbind::strict_json::parse_core_envelope(argv[1]);
         require(static_cast<bool>(parsed), "pinned core token did not pass strict envelope parsing");
     } else if (argc == 3 && std::string_view(argv[1]) == "--compact-jws") {
@@ -741,6 +832,19 @@ int main(int argc, char** argv) {
         const auto frame = read_bounded_frame(
             argv[2], 131072U, "invalid or oversized direct-token fixture file");
         verify_direct_token_frame(frame);
+    } else if (argc == 3 && std::string_view(argv[1]) == "--claims-file") {
+        const auto frame = read_bounded_frame(
+            argv[2], 131072U, "invalid or oversized authenticated-claims fixture file");
+        verify_authenticated_claims_frame(frame);
+    } else if (argc == 5 && std::string_view(argv[1]) == "--resource-limit") {
+        std::size_t maximum = 0U;
+        std::size_t input_size = 0U;
+        const auto maximum_result = std::from_chars(argv[3], argv[3] + std::strlen(argv[3]), maximum);
+        const auto input_result = std::from_chars(argv[4], argv[4] + std::strlen(argv[4]), input_size);
+        require(maximum_result.ec == std::errc{} && *maximum_result.ptr == '\0' &&
+                    input_result.ec == std::errc{} && *input_result.ptr == '\0',
+                "invalid resource-limit number");
+        verify_resource_limit(argv[2], maximum, input_size);
     } else {
         require(argc == 1, "usage: parsers_test [core-token | parser mode]");
     }
