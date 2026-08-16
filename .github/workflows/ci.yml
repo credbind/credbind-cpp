@@ -32,7 +32,15 @@ jobs:
           sudo apt-get install --yes clang libssl-dev pkg-config
       - name: Fetch and verify the pinned conformance corpus
         working-directory: credbind-cpp
-        run: make fixtures test-fixtures
+        env:
+          GH_TOKEN: ${{ secrets.CREDBIND_CROSS_REPO_READ_TOKEN }}
+        run: |
+          test -n "$GH_TOKEN" || { echo "CREDBIND_CROSS_REPO_READ_TOKEN must grant read-only access to credbind/spec" >&2; exit 1; }
+          artifact="$RUNNER_TEMP/credbind-ssh-v1-conformance-v1.0.0-rc.2.tar.gz"
+          trap 'rm -f "$artifact"' EXIT
+          gh release download v1.0.0-rc.2 --repo credbind/spec \
+            --pattern credbind-ssh-v1-conformance-v1.0.0-rc.2.tar.gz --output "$artifact"
+          CREDBIND_FIXTURE_SOURCE="$artifact" make fixtures test-fixtures
       - name: Run strict deterministic and sanitizer gates
         working-directory: credbind-cpp
         env:
@@ -58,7 +66,15 @@ jobs:
         run: echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig" >> "$GITHUB_ENV"
       - name: Fetch and verify the pinned conformance corpus
         working-directory: credbind-cpp
-        run: make fixtures test-fixtures
+        env:
+          GH_TOKEN: ${{ secrets.CREDBIND_CROSS_REPO_READ_TOKEN }}
+        run: |
+          test -n "$GH_TOKEN" || { echo "CREDBIND_CROSS_REPO_READ_TOKEN must grant read-only access to credbind/spec" >&2; exit 1; }
+          artifact="$RUNNER_TEMP/credbind-ssh-v1-conformance-v1.0.0-rc.2.tar.gz"
+          trap 'rm -f "$artifact"' EXIT
+          gh release download v1.0.0-rc.2 --repo credbind/spec \
+            --pattern credbind-ssh-v1-conformance-v1.0.0-rc.2.tar.gz --output "$artifact"
+          CREDBIND_FIXTURE_SOURCE="$artifact" make fixtures test-fixtures
       - name: Run strict, sanitizer and fuzz gates
         working-directory: credbind-cpp
         run: make check test-readme test-sanitize test-fuzz-smoke
