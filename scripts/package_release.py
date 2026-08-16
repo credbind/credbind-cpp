@@ -179,6 +179,21 @@ def copy_licenses(stage: pathlib.Path, dependencies: list[dict[str, Any]], syste
     return entries
 
 
+def copy_documentation(stage: pathlib.Path) -> list[dict[str, str]]:
+    directory = stage / "DOCUMENTATION"
+    directory.mkdir(mode=0o755)
+    result: list[dict[str, str]] = []
+    for name in ("README.md", "OPERATIONS.md"):
+        source = ROOT / name
+        if not source.is_file() or source.is_symlink():
+            fail(f"missing regular release documentation: {name}")
+        data = source.read_bytes()
+        relative = f"DOCUMENTATION/{name}"
+        write_file(directory / name, data)
+        result.append({"name": relative, "sha256": digest(data)})
+    return result
+
+
 def fixture_materials() -> list[dict[str, Any]]:
     lock = load_json(ROOT / "conformance" / "fixtures.lock.json")
     if not isinstance(lock, dict) or set(lock) != {
@@ -305,10 +320,11 @@ def main() -> None:
     created = datetime.datetime.fromtimestamp(source_epoch, datetime.UTC).isoformat().replace("+00:00", "Z")
     temporary: pathlib.Path | None = pathlib.Path(tempfile.mkdtemp(prefix=".release-metadata-", dir=distribution))
     try:
+        documentation = copy_documentation(temporary)
         licenses = copy_licenses(temporary, dependencies, system)
         write_file(temporary / "licenses.json", canonical({"version": 1, "entries": licenses}))
         write_file(temporary / "sbom.spdx.json", canonical(spdx(arguments.version, arguments.revision, arguments.target, created, dependencies, system, binary_sha)))
-        subjects = [{"name": binary.name, "sha256": binary_sha}, {"name": "licenses.json", "sha256": digest((temporary / "licenses.json").read_bytes())}, {"name": "sbom.spdx.json", "sha256": digest((temporary / "sbom.spdx.json").read_bytes())}]
+        subjects = [{"name": binary.name, "sha256": binary_sha}] + documentation + [{"name": "licenses.json", "sha256": digest((temporary / "licenses.json").read_bytes())}, {"name": "sbom.spdx.json", "sha256": digest((temporary / "sbom.spdx.json").read_bytes())}]
         write_file(temporary / "provenance.json", canonical(provenance(arguments, source_epoch, dirty, dependencies, system, subjects)))
         checksummed = subjects + [
             {"name": "provenance.json", "sha256": digest((temporary / "provenance.json").read_bytes())},

@@ -51,8 +51,13 @@ def main() -> int:
     require(set(first) == {"SHA256SUMS", "licenses.json", "provenance.json",
                            "sbom.spdx.json", "LICENSES/LICENSE.credbind-cpp",
                            "LICENSES/LICENSE.nlohmann_json",
-                           "LICENSES/LICENSE.tl__expected"},
+                           "LICENSES/LICENSE.tl__expected",
+                           "DOCUMENTATION/README.md",
+                           "DOCUMENTATION/OPERATIONS.md"},
             "C++ release metadata output is incomplete or contains extras")
+    for name in ("README.md", "OPERATIONS.md"):
+        require((output / "DOCUMENTATION" / name).read_bytes() == (root / name).read_bytes(),
+                f"release documentation differs from {name}")
 
     checksums: dict[str, str] = {}
     for line in (output / "SHA256SUMS").read_text(encoding="ascii").splitlines():
@@ -91,7 +96,7 @@ def main() -> int:
         "resolvedDependencies", [])
     require(provenance.get("_type") == "https://in-toto.io/Statement/v1"
             and provenance.get("predicateType") == "https://slsa.dev/provenance/v1"
-            and len(provenance.get("subject", [])) == 3
+            and len(provenance.get("subject", [])) == 5
             and any(item.get("uri", "").startswith("git+https://github.com/credbind/spec@")
                     for item in resolved),
             "C++ provenance statement is incomplete")

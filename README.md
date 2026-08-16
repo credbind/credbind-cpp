@@ -7,6 +7,10 @@ The repository pins the immutable `v1.0.0-rc.2` language-neutral conformance
 input. The implementation order and acceptance requirements are owned by the
 [C++ rewrite plan](https://github.com/credbind/planning/blob/main/rewrite/languages/cpp.md).
 
+Start with the command-first [operator walkthrough](OPERATIONS.md) for offline
+checks, deny-all and useful-policy bootstrap, render-only `sshd` staging, the
+root-owned OpenSSH test boundary and rollback.
+
 ## Build baseline
 
 The repository Makefile is the canonical interface. The host C++17 command is
@@ -43,8 +47,9 @@ copy with `OPENSSH_TEST_BINARY=/absolute/path` rather than using a wrapper.
 
 `make release-metadata` deterministically writes the verifier checksum, exact
 vendored/system dependency license inventory and redistributed license texts,
-an SPDX 2.3 SBOM and an in-toto/SLSA v1 provenance statement below the selected
-target directory. `make release-package VERSION=vMAJOR.MINOR.PATCH` also
+the README and operator walkthrough, an SPDX 2.3 SBOM and an in-toto/SLSA v1
+provenance statement below the selected target directory.
+`make release-package VERSION=vMAJOR.MINOR.PATCH` also
 requires an exact clean `HEAD` and matching source epoch, then creates a
 normalized timestamp/owner/mode archive and archive checksum. These outputs
 also pin the immutable conformance artifact, manifest and specification
