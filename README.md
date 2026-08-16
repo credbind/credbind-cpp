@@ -31,6 +31,15 @@ The aggregate `make test` and `make check` targets cover the implemented
 deterministic offline layers. Required external or separately instrumented
 gates remain explicit targets and never skip or report success.
 
+`make test-readme` verifies every documented shell command against the maintained
+Make surface. `make test-openssh` is a joint production-command gate: Go creates
+a fresh near-limit GQ carrier directly in an isolated test agent, C++ verifies
+it from a static public JWKS file, and an isolated host `sshd` consumes the
+rendered `AuthorizedKeysCommand` fragment for allow, PTY and deny checks. OpenSSH
+requires that command to be root-owned and not group/world writable. A local
+checkout binary therefore fails closed; provide an explicitly installed test
+copy with `OPENSSH_TEST_BINARY=/absolute/path` rather than using a wrapper.
+
 ## Strict parser checkpoint
 
 The internal C++17 parser layer uses pinned `nlohmann/json` v3.12.0 through its
@@ -190,13 +199,11 @@ binaries remain ignored development artifacts under `.cache`.
 An offline reproduction may set `CREDBIND_FIXTURE_SOURCE` to an existing asset;
 its SHA-256 must still match.
 
-Full protocol-scenario conformance and real-OpenSSH targets still fail
-explicitly. The implemented integration, syslog, deadline, sanitizer and fuzz
-smoke targets do not close either of those gates. In particular, the local
-presence of `sshd` is not a substitute for an isolated configured daemon, a
-fresh usable private-key/certificate carrier pair, the largest admitted GQ
-carrier, privilege boundary and measured authorization/denial evidence. This
-baseline makes no release, security, packaging or platform-support claim.
+The local real-OpenSSH target remains a release-environment gate until it runs
+with the required root-owned verifier copy. Even a passing local target would
+be one host slice, not the required RHEL side-by-side suite/extension/disclosure/
+deadline matrix. This baseline makes no release, security, packaging or
+platform-support claim.
 
 The project is licensed under Apache License 2.0. Contributions must include a
 Developer Certificate of Origin sign-off.

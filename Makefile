@@ -4,6 +4,8 @@ SHELL := /bin/sh
 CXX ?= c++
 PYTHON ?= python3
 PKG_CONFIG ?= pkg-config
+CREDBIND_GO_ROOT ?= $(abspath ../credbind-go)
+OPENSSH_TEST_BINARY ?= $(BINARY)
 HOST_SYSTEM := $(shell uname -s | tr '[:upper:]' '[:lower:]')
 HOST_MACHINE := $(shell uname -m)
 HOST_ARCH := $(if $(filter arm64 aarch64,$(HOST_MACHINE)),arm64,$(if $(filter x86_64 amd64,$(HOST_MACHINE)),amd64,$(HOST_MACHINE)))
@@ -174,7 +176,7 @@ fuzz: fuzz-check
 		$(FUZZ_ENV) $(FUZZ_DIR)/$(TARGET) -max_total_time=$(DURATION) -artifact_prefix="$$artifacts/" "$$work"
 
 test-readme:
-	@$(MAKE) --no-print-directory _not-implemented TARGET_NAME=$@
+	$(PYTHON) scripts/readme_commands_test.py README.md
 
 dependencies-check:
 	$(PYTHON) scripts/check_dependencies.py
@@ -193,8 +195,9 @@ verify-binary: build
 	@test "$(TARGET)" = "$(HOST_SYSTEM)-$(HOST_ARCH)" || { echo "verify-binary requires the host target" >&2; exit 1; }
 	$(PYTHON) scripts/verify_binary.py --binary "$(BINARY)" --target "$(TARGET)" --version "$(VERSION)" --revision "$(REVISION)" --source-date-epoch "$(SOURCE_DATE_EPOCH)"
 
-test-openssh:
-	@$(MAKE) --no-print-directory _not-implemented TARGET_NAME=$@
+test-openssh: build
+	$(PYTHON) tests/integration/openssh_authorized_keys_test.py \
+		"$(OPENSSH_TEST_BINARY)" "$(CREDBIND_GO_ROOT)"
 
 _not-implemented:
 	@echo "$(TARGET_NAME) is not implemented in the build baseline and cannot report success" >&2
