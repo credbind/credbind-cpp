@@ -15,6 +15,7 @@ EXPECTED = (
     ("make", "test-unit"),
     ("make", "dependencies-check"),
     ("make", "verify-binary"),
+    ("make", "test-release"),
     ("make", "test-sanitize"),
     ("make", "test-fuzz-smoke"),
     ("make", "fuzz", "TARGET=json", "DURATION=60"),

@@ -20,6 +20,7 @@ make build
 make test-unit
 make dependencies-check
 make verify-binary
+make test-release
 ```
 
 The command now also contains the bounded configuration, CLI and local-syslog
@@ -39,6 +40,18 @@ rendered `AuthorizedKeysCommand` fragment for allow, PTY and deny checks. OpenSS
 requires that command to be root-owned and not group/world writable. A local
 checkout binary therefore fails closed; provide an explicitly installed test
 copy with `OPENSSH_TEST_BINARY=/absolute/path` rather than using a wrapper.
+
+`make release-metadata` deterministically writes the verifier checksum, exact
+vendored/system dependency license inventory and redistributed license texts,
+an SPDX 2.3 SBOM and an in-toto/SLSA v1 provenance statement below the selected
+target directory. `make release-package VERSION=vMAJOR.MINOR.PATCH` also
+requires an exact clean `HEAD` and matching source epoch, then creates a
+normalized timestamp/owner/mode archive and archive checksum. These outputs
+also pin the immutable conformance artifact, manifest and specification
+revision as provenance materials. They are deliberately unsigned; platform
+signing and publication remain separate
+owner-controlled release operations and are never a side effect of
+`make check`.
 
 `make test-live` extends that same joint harness only for the four accepted
 Google/Auth0 workload cells. It consumes an owner-provided protected Go

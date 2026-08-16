@@ -34,6 +34,7 @@
   "system_dependencies": [
     {
       "api_baseline": "OpenSSL 3.0",
+      "license": "Apache-2.0",
       "linkage": "dynamic system libcrypto only",
       "minimum_version": "3.0.0",
       "name": "OpenSSL libcrypto",

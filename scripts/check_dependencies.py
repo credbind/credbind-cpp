@@ -33,6 +33,7 @@ def main() -> None:
 			dependency.get("name") != "OpenSSL libcrypto"
 			or dependency.get("minimum_version") != "3.0.0"
 			or dependency.get("api_baseline") != "OpenSSL 3.0"
+			or dependency.get("license") != "Apache-2.0"
 			or dependency.get("linkage") != "dynamic system libcrypto only"
 			or dependency.get("pkg_config") != "libcrypto"
 			or dependency.get("prohibited_linkage")

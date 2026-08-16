@@ -58,6 +58,7 @@ endif
 .PHONY: test-integration-adapters test-syslog-adapters
 .PHONY: test-conformance test-cli test-integration test-syslog test-deadline
 .PHONY: test-openssh test-live test-sanitize test-fuzz-smoke fuzz _fuzz-smoke test-readme check
+.PHONY: test-release release-metadata release-package
 .PHONY: dependencies-check crypto-check fuzz-check diagnostics verify-binary clean _not-implemented FORCE
 
 build: $(BINARY)
@@ -195,11 +196,25 @@ diagnostics: dependencies-check crypto-check
 	@echo "libcrypto=$$($(PKG_CONFIG) --modversion libcrypto)"
 	@$(PYTHON) -c 'import json; value=json.load(open("third_party/dependencies.json")); print(" ".join(item["name"]+"="+item["version"] for item in value["dependencies"]))'
 
-check: dependencies-check test build verify-binary
+check: dependencies-check test build verify-binary test-release
 
 verify-binary: build
 	@test "$(TARGET)" = "$(HOST_SYSTEM)-$(HOST_ARCH)" || { echo "verify-binary requires the host target" >&2; exit 1; }
 	$(PYTHON) scripts/verify_binary.py --binary "$(BINARY)" --target "$(TARGET)" --version "$(VERSION)" --revision "$(REVISION)" --source-date-epoch "$(SOURCE_DATE_EPOCH)"
+
+release-metadata: verify-binary
+	$(PYTHON) scripts/package_release.py --cxx "$(CXX)" --pkg-config "$(PKG_CONFIG)" \
+		--dist "$(DIST_DIR)" --version "$(VERSION)" --revision "$(REVISION)" \
+		--source-date-epoch "$(SOURCE_DATE_EPOCH)" --target "$(TARGET)"
+
+test-release: release-metadata
+	$(PYTHON) scripts/release_package_test.py "$(CXX)" "$(PKG_CONFIG)" "$(DIST_DIR)" \
+		"$(VERSION)" "$(REVISION)" "$(SOURCE_DATE_EPOCH)" "$(TARGET)" "$(PYTHON)"
+
+release-package: check
+	$(PYTHON) scripts/package_release.py --cxx "$(CXX)" --pkg-config "$(PKG_CONFIG)" \
+		--dist "$(DIST_DIR)" --version "$(VERSION)" --revision "$(REVISION)" \
+		--source-date-epoch "$(SOURCE_DATE_EPOCH)" --target "$(TARGET)" --archive
 
 test-openssh: build
 	$(PYTHON) tests/integration/openssh_authorized_keys_test.py \
