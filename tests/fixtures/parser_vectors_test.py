@@ -18,8 +18,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CORPUS = (
-    ROOT / ".cache" / "conformance" / "v1.0.0-rc.2" / "corpus"
-    / "credbind-ssh-v1-conformance-v1.0.0-rc.2"
+    ROOT / ".cache" / "conformance" / "v1.0.0-rc.3" / "corpus"
+    / "credbind-ssh-v1-conformance-v1.0.0-rc.3"
 )
 
 
@@ -161,7 +161,7 @@ def direct_carrier_frame(
     allowed_extensions: str = "permit-port-forwarding,permit-pty",
     account_issuer: str | None = None,
     account_claim: str = "sub",
-    account_value: str = "fixture-subject-v1-rc2",
+    account_value: str = "fixture-subject-v1-rc3",
     maximum_identity_lifetime: int = 0,
     clock_skew: int = 30,
 ) -> bytes:
@@ -556,7 +556,7 @@ def main() -> None:
                 "account_rule": {
                     "issuer": external_token["authenticated_issuer"],
                     "claim": "sub",
-                    "value": "fixture-subject-v1-rc2",
+                    "value": "fixture-subject-v1-rc3",
                     "allowed_certificate_extensions": [
                         "permit-port-forwarding", "permit-pty"
                     ],

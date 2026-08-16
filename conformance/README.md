@@ -58,7 +58,7 @@ and pinned parser/carrier/JWKS coverage. The three Clang/libFuzzer smoke
 harnesses mutate copied JSON, OpenSSH-certificate and token corpora only under
 `.cache`.
 
-`make test-conformance` interprets all 72 immutable cases. Each C++-applicable
+`make test-conformance` interprets all 78 immutable cases. Each C++-applicable
 case drives the production command or the narrow internal boundary named by
 the case and compares the stable category plus any declared exit and stdout
 observable. Cases owned exclusively by Go acquisition, provider-helper, OAuth

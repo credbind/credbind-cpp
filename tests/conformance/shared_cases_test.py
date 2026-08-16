@@ -19,8 +19,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 CORPUS = (
-    ROOT / ".cache/conformance/v1.0.0-rc.2/corpus"
-    / "credbind-ssh-v1-conformance-v1.0.0-rc.2"
+    ROOT / ".cache/conformance/v1.0.0-rc.3/corpus"
+    / "credbind-ssh-v1-conformance-v1.0.0-rc.3"
 )
 
 
@@ -59,6 +59,12 @@ DISPOSITIONS = {
     "validity-fixed-30s-backdate": "go-client-identity-creation-only",
     "confidential-web-deterministic-pkce-required": "go-acquisition-only",
     "loopback-lifetime-bounds": "go-acquisition-only",
+    "native-auth-none-without-secret-ref-pass": "go-acquisition-registration-only",
+    "native-auth-client-secret-post-with-secret-ref-pass": "go-acquisition-registration-only",
+    "native-auth-client-secret-post-missing-secret-ref": "go-acquisition-registration-only",
+    "native-auth-none-with-secret-ref": "go-acquisition-registration-only",
+    "native-auth-client-secret-basic-rejected": "go-acquisition-registration-only",
+    "native-auth-secret-unavailable-no-fallback": "go-acquisition-registration-only",
 }
 
 ADAPTER_CASES = {
@@ -378,8 +384,8 @@ def main() -> None:
     args = parser.parse_args()
     manifest = load(CORPUS / "MANIFEST.json")
     cases = [load(path) for path in sorted((CORPUS / "cases").glob("*/*.json"))]
-    if len(cases) != 72 or len(manifest.get("cases", [])) != 72:
-        raise RuntimeError("pinned corpus does not contain exactly 72 cases")
+    if len(cases) != 78 or len(manifest.get("cases", [])) != 78:
+        raise RuntimeError("pinned corpus does not contain exactly 78 cases")
     ids = [case["id"] for case in cases]
     if len(set(ids)) != len(ids):
         raise RuntimeError("duplicate conformance case identifier")
@@ -447,15 +453,15 @@ def main() -> None:
     dispositioned = len(results) - applicable
     report = {
         "artifact_sha256": hashlib.sha256(
-            (ROOT / ".cache/conformance/v1.0.0-rc.2/credbind-ssh-v1-conformance-v1.0.0-rc.2.tar.gz").read_bytes()
+            (ROOT / ".cache/conformance/v1.0.0-rc.3/credbind-ssh-v1-conformance-v1.0.0-rc.3.tar.gz").read_bytes()
         ).hexdigest(),
         "manifest_sha256": hashlib.sha256(
             (CORPUS / "MANIFEST.json").read_bytes()
         ).hexdigest(),
         "implementation": "cpp",
-        "release": "v1.0.0-rc.2",
+        "release": "v1.0.0-rc.3",
         "cases": results,
-        "summary": {"applicable": applicable, "dispositioned": dispositioned, "total": 72},
+        "summary": {"applicable": applicable, "dispositioned": dispositioned, "total": 78},
         "status": "cpp-applicable-observables-verified",
     }
     print(json.dumps(report, sort_keys=True, separators=(",", ":")))

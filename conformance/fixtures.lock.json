@@ -1,14 +1,14 @@
 {
   "format_version": 1,
-  "release": "v1.0.0-rc.2",
-  "specification_revision": "9e30339d5ac425b22d50b1943886863dba3ae760",
+  "release": "v1.0.0-rc.3",
+  "specification_revision": "089cb14aa422a4fbf76ab0e403d08a91fae1b57f",
   "artifact": {
-    "name": "credbind-ssh-v1-conformance-v1.0.0-rc.2.tar.gz",
-    "url": "https://github.com/credbind/spec/releases/download/v1.0.0-rc.2/credbind-ssh-v1-conformance-v1.0.0-rc.2.tar.gz",
-    "sha256": "0969418d5bda506b5f14a605b0f8c340d7f02d28d13a18ff3c75576640d65618"
+    "name": "credbind-ssh-v1-conformance-v1.0.0-rc.3.tar.gz",
+    "url": "https://github.com/credbind/spec/releases/download/v1.0.0-rc.3/credbind-ssh-v1-conformance-v1.0.0-rc.3.tar.gz",
+    "sha256": "f4ca23ae4fe01c4219fc8615fc8eb70f296ca5d4d9901dde4770dbb93b8688d6"
   },
   "manifest": {
-    "path": "credbind-ssh-v1-conformance-v1.0.0-rc.2/MANIFEST.json",
-    "sha256": "580346908d691a7e567e1d41dba09fef0e2b5355870c56752522ace4a722b8fc"
+    "path": "credbind-ssh-v1-conformance-v1.0.0-rc.3/MANIFEST.json",
+    "sha256": "546937ba1a36527c85bbbf6cbfa9c62b20f3f43d723a7ea352a0310c53640c13"
   }
 }
