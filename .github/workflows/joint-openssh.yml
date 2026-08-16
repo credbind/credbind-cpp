@@ -1,0 +1,51 @@
+name: Joint production OpenSSH
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  production-openssh:
+    name: Go GQ carrier / C++ verifier / Ubuntu OpenSSH
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Require cross-repository read credential
+        env:
+          TOKEN: ${{ secrets.CREDBIND_CROSS_REPO_READ_TOKEN }}
+        run: test -n "$TOKEN" || { echo 'CREDBIND_CROSS_REPO_READ_TOKEN is required' >&2; exit 1; }
+      - name: Check out C++ verifier
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          path: credbind-cpp
+      - name: Check out pinned Go carrier generator
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          repository: credbind/credbind-go
+          ref: 8ac043f8b8815f832c4818dd38054e0816817055
+          token: ${{ secrets.CREDBIND_CROSS_REPO_READ_TOKEN }}
+          persist-credentials: false
+          path: credbind-go
+      - name: Install Go 1.26.5
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: 1.26.5
+          cache-dependency-path: credbind-go/go.sum
+      - name: Install system prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libssl-dev openssh-client openssh-server pkg-config
+          sudo install -d -o root -g root -m 0755 /run/sshd
+      - name: Build and install exact root-owned verifier
+        working-directory: credbind-cpp
+        run: |
+          make build
+          sudo install -o root -g root -m 0755 dist/linux-amd64/credbind-ssh-authorized-keys /usr/local/bin/credbind-ssh-authorized-keys-test
+      - name: Run production AuthorizedKeysCommand gate
+        working-directory: credbind-cpp
+        run: make test-openssh OPENSSH_TEST_BINARY=/usr/local/bin/credbind-ssh-authorized-keys-test
+      - name: Remove temporary verifier
+        if: always()
+        run: sudo rm -f /usr/local/bin/credbind-ssh-authorized-keys-test
