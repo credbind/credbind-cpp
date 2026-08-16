@@ -749,7 +749,7 @@ void test_core_envelope() {
                 parsed->caller_signature.signature == "AA" && parsed->evidence == "AA",
             "strict core envelope parse failed");
 
-    for (const std::string& input : {
+    for (const char* const input : {
              R"({"payload":"AA","payload":"AA","signatures":[{"protected":"AA","signature":"AA"}],"credbind_evidence":"AA"})",
              R"({"payload":"AA","\u0070ayload":"AA","signatures":[{"protected":"AA","signature":"AA"}],"credbind_evidence":"AA"})",
              R"({"payload":"AA","signatures":[{"protected":"AA","signature":"AA"}],"credbind_evidence":"AA"} [])",

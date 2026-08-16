@@ -30,6 +30,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes clang libssl-dev pkg-config
+      - name: Fetch and verify the pinned conformance corpus
+        working-directory: credbind-cpp
+        run: make fixtures test-fixtures
       - name: Run strict deterministic and sanitizer gates
         working-directory: credbind-cpp
         env:
@@ -53,6 +56,9 @@ jobs:
           path: credbind-cpp
       - name: Select Homebrew OpenSSL 3
         run: echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig" >> "$GITHUB_ENV"
+      - name: Fetch and verify the pinned conformance corpus
+        working-directory: credbind-cpp
+        run: make fixtures test-fixtures
       - name: Run strict, sanitizer and fuzz gates
         working-directory: credbind-cpp
         run: make check test-readme test-sanitize test-fuzz-smoke
