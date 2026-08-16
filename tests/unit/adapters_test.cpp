@@ -626,7 +626,7 @@ void test_authenticated_command(std::string_view vector_path,
             "config-check cancellation is silent on stdout and audited");
 
     const std::vector<std::string_view> render{
-        "sshd-config", "render", "--config", path, "--verifier", "/bin/sh",
+        "sshd-config", "render", "--config", path, "--verifier", path,
         "--command-user", "credbind"};
     std::ostringstream render_diagnostics;
     require(credbind::command::run(render, failed_output, render_diagnostics,

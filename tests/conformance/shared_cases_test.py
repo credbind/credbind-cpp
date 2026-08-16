@@ -97,7 +97,13 @@ def invoke_adapter(binary: Path, case_id: str, *arguments: str,
         env=environment, check=False,
     )
     if result.returncode != 0:
-        raise RuntimeError(f"C++ adapter assertion failed for {case_id}")
+        detail = result.stderr.strip()
+        if len(detail) > 2048:
+            detail = detail[:2048] + "..."
+        suffix = f": {detail}" if detail else ""
+        raise RuntimeError(
+            f"C++ adapter assertion failed for {case_id}{suffix}"
+        )
 
 
 def flip_text(text: str) -> str:

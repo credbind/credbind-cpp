@@ -51,7 +51,6 @@ jobs:
         working-directory: credbind-cpp
         env:
           CXX: clang++
-          FUZZ_CXX: clang++
         run: make test-fuzz-smoke
   macos:
     name: macOS 15 arm64 / Apple Clang
@@ -62,8 +61,12 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           path: credbind-cpp
-      - name: Select Homebrew OpenSSL 3
-        run: echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig" >> "$GITHUB_ENV"
+      - name: Install and select Homebrew OpenSSL 3 and LLVM
+        run: |
+          brew install llvm
+          echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig" >> "$GITHUB_ENV"
+          echo "FUZZ_CXX=$(brew --prefix llvm)/bin/clang++" >> "$GITHUB_ENV"
+          echo "LLVM_SYMBOLIZER=$(brew --prefix llvm)/bin/llvm-symbolizer" >> "$GITHUB_ENV"
       - name: Fetch and verify the pinned conformance corpus
         working-directory: credbind-cpp
         env:
