@@ -28,6 +28,7 @@ SANITIZE_TEST_BINARY := .cache/tests/parsers-sanitize
 SANITIZE_ADAPTER_TEST_BINARY := .cache/tests/adapters-sanitize
 FUZZ_DIR := .cache/fuzz
 FUZZ_CXX ?= $(shell if test -x /opt/homebrew/opt/llvm/bin/clang++; then echo /opt/homebrew/opt/llvm/bin/clang++; else command -v clang++; fi)
+FUZZ_LDFLAGS ?=
 LLVM_SYMBOLIZER ?= $(shell if test -x /opt/homebrew/opt/llvm/bin/llvm-symbolizer; then echo /opt/homebrew/opt/llvm/bin/llvm-symbolizer; elif test -n "$(FUZZ_CXX)" && test -x "$$(dirname "$(FUZZ_CXX)")/llvm-symbolizer"; then echo "$$(dirname "$(FUZZ_CXX)")/llvm-symbolizer"; fi)
 SYMBOLIZER_ENV := $(if $(LLVM_SYMBOLIZER),ASAN_SYMBOLIZER_PATH=$(LLVM_SYMBOLIZER),)
 ifeq ($(HOST_SYSTEM),darwin)
@@ -144,15 +145,15 @@ test-sanitize: dependencies-check crypto-check fixtures $(SANITIZE_TEST_BINARY) 
 
 $(FUZZ_DIR)/json: fuzz/json_fuzz.cpp src/strict_json.cpp src/strict_json.hpp src/parse_error.hpp $(THIRD_PARTY_HEADERS) Makefile
 	@mkdir -p $(@D)
-	$(FUZZ_CXX) -Isrc -Ithird_party -std=c++17 -O1 -g -fno-omit-frame-pointer -fsanitize=fuzzer,address,undefined -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow -Wformat=2 -Werror fuzz/json_fuzz.cpp src/strict_json.cpp -fsanitize=fuzzer,address,undefined -o $@
+	$(FUZZ_CXX) -Isrc -Ithird_party -std=c++17 -O1 -g -fno-omit-frame-pointer -fsanitize=fuzzer,address,undefined -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow -Wformat=2 -Werror fuzz/json_fuzz.cpp src/strict_json.cpp $(FUZZ_LDFLAGS) -fsanitize=fuzzer,address,undefined -o $@
 
 $(FUZZ_DIR)/certificate: fuzz/certificate_fuzz.cpp src/openssh_certificate.cpp src/openssh_certificate.hpp src/parse_error.hpp $(THIRD_PARTY_HEADERS) Makefile
 	@mkdir -p $(@D)
-	$(FUZZ_CXX) -Isrc -Ithird_party -std=c++17 -O1 -g -fno-omit-frame-pointer -fsanitize=fuzzer,address,undefined -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow -Wformat=2 -Werror fuzz/certificate_fuzz.cpp src/openssh_certificate.cpp -fsanitize=fuzzer,address,undefined -o $@
+	$(FUZZ_CXX) -Isrc -Ithird_party -std=c++17 -O1 -g -fno-omit-frame-pointer -fsanitize=fuzzer,address,undefined -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow -Wformat=2 -Werror fuzz/certificate_fuzz.cpp src/openssh_certificate.cpp $(FUZZ_LDFLAGS) -fsanitize=fuzzer,address,undefined -o $@
 
 $(FUZZ_DIR)/token: fuzz/token_fuzz.cpp src/base64url.cpp src/base64url.hpp src/jws.cpp src/jws.hpp src/strict_json.cpp src/strict_json.hpp src/parse_error.hpp $(THIRD_PARTY_HEADERS) Makefile
 	@mkdir -p $(@D)
-	$(FUZZ_CXX) -Isrc -Ithird_party -std=c++17 -O1 -g -fno-omit-frame-pointer -fsanitize=fuzzer,address,undefined -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow -Wformat=2 -Werror fuzz/token_fuzz.cpp src/base64url.cpp src/jws.cpp src/strict_json.cpp -fsanitize=fuzzer,address,undefined -o $@
+	$(FUZZ_CXX) -Isrc -Ithird_party -std=c++17 -O1 -g -fno-omit-frame-pointer -fsanitize=fuzzer,address,undefined -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow -Wformat=2 -Werror fuzz/token_fuzz.cpp src/base64url.cpp src/jws.cpp src/strict_json.cpp $(FUZZ_LDFLAGS) -fsanitize=fuzzer,address,undefined -o $@
 
 fuzz-check:
 	@test -n "$(FUZZ_CXX)" && test -x "$(FUZZ_CXX)" || { \
