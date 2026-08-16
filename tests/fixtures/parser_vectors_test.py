@@ -551,6 +551,7 @@ def main() -> None:
                 "caller_algorithms": ["ES256"],
                 "evidence_profiles": ["standard-jws-v1"],
                 "binding_profiles": ["oidc-nonce-v1"],
+                "acquisition_profiles": ["oidc-native-auth-code-v1"],
                 "admitted_claims": ["sub", "email", "iat"],
                 "account_rule": {
                     "issuer": external_token["authenticated_issuer"],

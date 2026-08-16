@@ -23,6 +23,10 @@ MAX_FIELD_BYTES = 65536
 CALLER_ALGORITHMS = {"ES256", "Ed25519"}
 EVIDENCE_PROFILES = {"standard-jws-v1", "gq-rs256-v1"}
 BINDING_PROFILES = {"oidc-nonce-v1", "audience-v1", "credbind-claim-v1"}
+ACQUISITION_PROFILES = {
+    "oidc-native-auth-code-v1", "oidc-confidential-web-auth-code-v1",
+    "challenge-bound-workload-v1",
+}
 EXTENSIONS = {
     "permit-agent-forwarding",
     "permit-port-forwarding",
@@ -84,7 +88,8 @@ def main() -> None:
             "certificate_blob_base64", "key_type_argument", "requested_user",
             "issuer", "jwks_path", "audience", "authorized_party",
             "verification_time", "principal_claim", "caller_algorithms",
-            "evidence_profiles", "binding_profiles", "admitted_claims",
+            "evidence_profiles", "binding_profiles", "acquisition_profiles",
+            "admitted_claims",
             "account_rule", "maximum_identity_lifetime_seconds",
             "clock_skew_seconds", "require_non_reconstructible_evidence",
             "expected",
@@ -124,6 +129,10 @@ def main() -> None:
     )
     binding_profiles = unique_set(
         descriptor["binding_profiles"], BINDING_PROFILES, "binding profiles"
+    )
+    unique_set(
+        descriptor["acquisition_profiles"], ACQUISITION_PROFILES,
+        "acquisition profiles",
     )
     admitted_claims = unique_set(
         descriptor["admitted_claims"], None, "admitted claims"

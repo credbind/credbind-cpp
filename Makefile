@@ -6,6 +6,10 @@ PYTHON ?= python3
 PKG_CONFIG ?= pkg-config
 CREDBIND_GO_ROOT ?= $(abspath ../credbind-go)
 OPENSSH_TEST_BINARY ?= $(BINARY)
+CREDBIND_LIVE_REQUEST ?=
+CREDBIND_LIVE_CELL ?=
+CREDBIND_LIVE_ACTION_SOURCE ?=
+CREDBIND_LIVE_EVIDENCE_OUTPUT ?=
 HOST_SYSTEM := $(shell uname -s | tr '[:upper:]' '[:lower:]')
 HOST_MACHINE := $(shell uname -m)
 HOST_ARCH := $(if $(filter arm64 aarch64,$(HOST_MACHINE)),arm64,$(if $(filter x86_64 amd64,$(HOST_MACHINE)),amd64,$(HOST_MACHINE)))
@@ -53,7 +57,7 @@ endif
 .PHONY: build credbind-ssh-authorized-keys fixtures test test-unit test-fixtures test-cli-adapters
 .PHONY: test-integration-adapters test-syslog-adapters
 .PHONY: test-conformance test-cli test-integration test-syslog test-deadline
-.PHONY: test-openssh test-sanitize test-fuzz-smoke fuzz _fuzz-smoke test-readme check
+.PHONY: test-openssh test-live test-sanitize test-fuzz-smoke fuzz _fuzz-smoke test-readme check
 .PHONY: dependencies-check crypto-check fuzz-check diagnostics verify-binary clean _not-implemented FORCE
 
 build: $(BINARY)
@@ -102,6 +106,8 @@ test-cli-adapters: build
 	$(PYTHON) tests/cli/adapters_test.py "$(BINARY)" "$(CURDIR)/tests/fixtures/issuer-jwks.json"
 
 test-integration-adapters: test-cli-adapters test-syslog-adapters
+	$(PYTHON) tests/integration/live_harness_config_test.py \
+		"$(BINARY)" "$(CURDIR)/tests/fixtures/issuer-jwks.json"
 	@echo "specified offline config/check/render/verify integration passed"
 
 test-integration: test-integration-adapters
@@ -196,6 +202,17 @@ verify-binary: build
 	$(PYTHON) scripts/verify_binary.py --binary "$(BINARY)" --target "$(TARGET)" --version "$(VERSION)" --revision "$(REVISION)" --source-date-epoch "$(SOURCE_DATE_EPOCH)"
 
 test-openssh: build
+	$(PYTHON) tests/integration/openssh_authorized_keys_test.py \
+		"$(OPENSSH_TEST_BINARY)" "$(CREDBIND_GO_ROOT)"
+
+test-live: build
+	@test -n "$(CREDBIND_LIVE_REQUEST)" || { echo "CREDBIND_LIVE_REQUEST is required" >&2; exit 1; }
+	@test -n "$(CREDBIND_LIVE_CELL)" || { echo "CREDBIND_LIVE_CELL is required" >&2; exit 1; }
+	@test -n "$(CREDBIND_LIVE_EVIDENCE_OUTPUT)" || { echo "CREDBIND_LIVE_EVIDENCE_OUTPUT is required" >&2; exit 1; }
+	CREDBIND_LIVE_REQUEST="$(CREDBIND_LIVE_REQUEST)" \
+	CREDBIND_LIVE_CELL="$(CREDBIND_LIVE_CELL)" \
+	CREDBIND_LIVE_ACTION_SOURCE="$(CREDBIND_LIVE_ACTION_SOURCE)" \
+	CREDBIND_LIVE_EVIDENCE_OUTPUT="$(CREDBIND_LIVE_EVIDENCE_OUTPUT)" \
 	$(PYTHON) tests/integration/openssh_authorized_keys_test.py \
 		"$(OPENSSH_TEST_BINARY)" "$(CREDBIND_GO_ROOT)"
 

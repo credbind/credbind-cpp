@@ -40,6 +40,22 @@ requires that command to be root-owned and not group/world writable. A local
 checkout binary therefore fails closed; provide an explicitly installed test
 copy with `OPENSSH_TEST_BINARY=/absolute/path` rather than using a wrapper.
 
+`make test-live` extends that same joint harness only for the four accepted
+Google/Auth0 workload cells. It consumes an owner-provided protected Go
+initialization request and existing ADC/native-store credentials, requires the
+exact Auth0 Action source when applicable, generates a fresh standard or GQ
+carrier in Go, verifies it through both direct implementations and isolated
+OpenSSH using the root-owned C++ command, and writes one new sanitized evidence
+file. Go first reverifies the registration through its compiled production
+bootstrap and exact installed signed release. The raw credential, carrier and
+public-key staging files remain in a
+private temporary directory and are removed on every exit. The harness has no
+provider-management path and cannot create or change an application, tenant,
+service account, role, API, callback, Action or secret. Interactive native and
+confidential-web live cells remain outside this workload harness and fail
+closed until their owner-provided registrations and hosting prerequisites are
+available.
+
 ## Strict parser checkpoint
 
 The internal C++17 parser layer uses pinned `nlohmann/json` v3.12.0 through its

@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import pathlib
@@ -54,6 +55,54 @@ def write_private(path: pathlib.Path, data: bytes) -> None:
         require(written == len(data), "short private test-file write")
     finally:
         os.close(descriptor)
+
+
+def validate_evidence_output(path: pathlib.Path) -> None:
+    require(path.is_absolute() and not path.exists(),
+            "live evidence output must be a new absolute file")
+    parent = path.parent
+    status = parent.lstat()
+    require(parent.is_dir() and not parent.is_symlink(),
+            "live evidence parent must be a real directory")
+    require(status.st_uid in {0, os.geteuid()} and status.st_mode & 0o022 == 0,
+            "live evidence parent has an unsafe owner or mode")
+
+
+def validate_live_report(report: object, cell: str) -> dict[str, object]:
+    require(isinstance(report, dict), "live Go report is not an object")
+    expected_fields = {
+        "version", "cell", "provider", "registry_release",
+        "registry_entry_sha256", "issuer", "source_profile",
+        "acquisition_profile", "binding_profile", "evidence_profile",
+        "caller_algorithm", "issuer_algorithm", "issuer_key_bits",
+        "issuer_exponent", "issuer_jwk_canonical_sha256",
+        "commitment_characters", "credential_valid_until",
+        "certificate_valid_after", "certificate_valid_before", "token_bytes",
+        "evidence_bytes", "certificate_bytes", "offered_key_characters",
+        "go_verification_microseconds", "expired_credential_denied",
+        "unavailable_issuer_key_denied", "sanitized_request_fields",
+    }
+    if cell.startswith("A-"):
+        expected_fields.add("action_source_sha256")
+    require(set(report) == expected_fields,
+            "live Go report has a missing or unexpected field")
+    require(report.get("version") == 1 and report.get("cell") == cell,
+            "live Go report did not match the selected cell")
+    require(report.get("expired_credential_denied") is True,
+            "live Go report omitted the expired-credential denial")
+    require(report.get("unavailable_issuer_key_denied") is True,
+            "live Go report omitted the unavailable-key denial")
+    for field in ("registry_entry_sha256", "issuer_jwk_canonical_sha256"):
+        value = report.get(field)
+        require(isinstance(value, str) and len(value) == 64
+                and all(character in "0123456789abcdef" for character in value),
+                f"live Go report has an invalid {field}")
+    if cell.startswith("A-"):
+        value = report.get("action_source_sha256")
+        require(isinstance(value, str) and len(value) == 64
+                and all(character in "0123456789abcdef" for character in value),
+                "live Go report has an invalid Action source digest")
+    return report
 
 
 def reserve_port() -> int:
@@ -112,6 +161,27 @@ def verifier_config(descriptor: dict[str, object], jwks: pathlib.Path) -> bytes:
     user = str(descriptor["requested_user"])
     account = descriptor["account_rule"]
     require(isinstance(account, dict), "generated account rule has the wrong type")
+    issuer_policy = {
+        "policy_id": "joint-live-carrier",
+        "issuer": issuer,
+        "key_source": {"type": "static-jwks-file", "path": str(jwks)},
+        "audiences": [str(descriptor["audience"])],
+        "issuer_algorithms": ["RS256"],
+        "caller_algorithms": list(descriptor["caller_algorithms"]),
+        "evidence_profiles": list(descriptor["evidence_profiles"]),
+        "binding_profiles": list(descriptor["binding_profiles"]),
+        "acquisition_profiles": list(descriptor["acquisition_profiles"]),
+        "require_non_reconstructible_evidence": bool(
+            descriptor["require_non_reconstructible_evidence"]
+        ),
+        "certificate_principal_claim": str(descriptor["principal_claim"]),
+    }
+    authorized_party = str(descriptor["authorized_party"])
+    if authorized_party:
+        issuer_policy["authorized_parties"] = [authorized_party]
+    maximum_lifetime = int(descriptor["maximum_identity_lifetime_seconds"])
+    if maximum_lifetime > 0:
+        issuer_policy["maximum_identity_lifetime"] = f"{maximum_lifetime}s"
     value = {
         "version": 1,
         "clock_skew": "30s",
@@ -123,19 +193,7 @@ def verifier_config(descriptor: dict[str, object], jwks: pathlib.Path) -> bytes:
             "max_offered_key_chars": 65536,
             "max_authorized_keys_output_chars": 4096,
         },
-        "trusted_issuers": [{
-            "policy_id": "joint-gq-live",
-            "issuer": issuer,
-            "key_source": {"type": "static-jwks-file", "path": str(jwks)},
-            "audiences": [str(descriptor["audience"])],
-            "issuer_algorithms": ["RS256"],
-            "caller_algorithms": list(descriptor["caller_algorithms"]),
-            "evidence_profiles": list(descriptor["evidence_profiles"]),
-            "binding_profiles": list(descriptor["binding_profiles"]),
-            "acquisition_profiles": ["oidc-native-auth-code-v1"],
-            "require_non_reconstructible_evidence": True,
-            "certificate_principal_claim": str(descriptor["principal_claim"]),
-        }],
+        "trusted_issuers": [issuer_policy],
         "accounts": {user: {"allow": [{
             "issuer": issuer,
             "all": [{
@@ -174,6 +232,31 @@ def main() -> int:
     current_user = pwd.getpwuid(os.geteuid()).pw_name
     require(current_user != "", "current account has no OpenSSH username")
 
+    live_request = os.environ.get("CREDBIND_LIVE_REQUEST", "")
+    live_cell = os.environ.get("CREDBIND_LIVE_CELL", "")
+    live = bool(live_request or live_cell)
+    evidence_output: pathlib.Path | None = None
+    if live:
+        require(bool(live_request) and bool(live_cell),
+                "CREDBIND_LIVE_REQUEST and CREDBIND_LIVE_CELL are both required")
+        require(live_cell in {
+            "G-WORKLOAD-STD", "G-WORKLOAD-GQ",
+            "A-WORKLOAD-STD", "A-WORKLOAD-GQ",
+        }, "only the four accepted workload cells are implemented by this live harness")
+        request_path = pathlib.Path(live_request)
+        require(request_path.is_absolute() and request_path.is_file(),
+                "CREDBIND_LIVE_REQUEST must be an absolute protected file")
+        action_source = os.environ.get("CREDBIND_LIVE_ACTION_SOURCE", "")
+        require(not live_cell.startswith("A-") or bool(action_source),
+                "Auth0 live workload cells require CREDBIND_LIVE_ACTION_SOURCE")
+        require(not action_source or pathlib.Path(action_source).is_absolute(),
+                "CREDBIND_LIVE_ACTION_SOURCE must be absolute")
+        raw_evidence_output = os.environ.get("CREDBIND_LIVE_EVIDENCE_OUTPUT", "")
+        require(bool(raw_evidence_output),
+                "CREDBIND_LIVE_EVIDENCE_OUTPUT is required")
+        evidence_output = pathlib.Path(raw_evidence_output)
+        validate_evidence_output(evidence_output)
+
     root = pathlib.Path(tempfile.mkdtemp(prefix="credbind-cpp-ssh-", dir="/tmp"))
     agent: subprocess.Popen[bytes] | None = None
     server: subprocess.Popen[bytes] | None = None
@@ -198,15 +281,38 @@ def main() -> int:
             "GOEXPERIMENT": "jsonv2",
             "SSH_AUTH_SOCK": str(agent_socket),
         })
+        generated_command = [
+            go, "test", "-count=1", "-run", "^TestMaximumSizeGQCarrier$",
+            "./ssh/internal/verifier",
+        ]
+        generated_timeout = 90
+        if live:
+            environment.update({
+                "CREDBIND_LIVE_REQUEST": live_request,
+                "CREDBIND_LIVE_CELL": live_cell,
+                "CREDBIND_LIVE_OUTPUT": str(artifact),
+                "CREDBIND_LIVE_USER": current_user,
+                "CREDBIND_LIVE_AGENT": "1",
+            })
+            if os.environ.get("CREDBIND_LIVE_ACTION_SOURCE", ""):
+                environment["CREDBIND_LIVE_ACTION_SOURCE"] = os.environ[
+                    "CREDBIND_LIVE_ACTION_SOURCE"
+                ]
+            generated_command = [
+                go, "test", "-count=1", "-tags=credbind_live_test",
+                "-run", "^TestLiveWorkloadCarrier$", "-timeout=6m",
+                "./ssh/internal/verifier",
+            ]
+            generated_timeout = 370
         generated = run(
-            [go, "test", "-count=1", "-run", "^TestMaximumSizeGQCarrier$", "./ssh/internal/verifier"],
-            cwd=go_root,
-            environment=environment,
-            timeout=90,
+            generated_command, cwd=go_root, environment=environment,
+            timeout=generated_timeout,
         )
         require(
             generated.returncode == 0,
-            f"fresh Go GQ carrier generation failed: {generated.stderr.decode(errors='replace')}",
+            "fresh Go carrier generation failed: "
+            + generated.stdout.decode(errors="replace")
+            + generated.stderr.decode(errors="replace"),
         )
         descriptor_path = artifact / "carrier.json"
         descriptor = json.loads(descriptor_path.read_text(encoding="utf-8"))
@@ -224,10 +330,12 @@ def main() -> int:
         )
         offered_key = str(descriptor["certificate_blob_base64"])
         key_type = str(descriptor["key_type_argument"])
+        direct_started = time.monotonic_ns()
         direct = run([
             str(binary), "verify", "--config", str(config_path), "--user", current_user,
             "--key", offered_key, "--key-type", key_type,
         ], timeout=15)
+        direct_microseconds = (time.monotonic_ns() - direct_started) // 1000
         expected = descriptor["expected"]
         require(isinstance(expected, dict), "generated expected result has the wrong type")
         expected_line = (
@@ -318,7 +426,13 @@ def main() -> int:
             + server_log.read_text(errors="replace"),
         )
         pty = run(client_base[:1] + ["-tt"] + client_base[1:] + ["test -t 0"], environment=client_environment, timeout=20)
-        require(pty.returncode == 0, "admitted permit-pty extension was not effective")
+        permitted_extensions = set(
+            descriptor["account_rule"]["allowed_certificate_extensions"]
+        )
+        if "permit-pty" in permitted_extensions:
+            require(pty.returncode == 0, "admitted permit-pty extension was not effective")
+        else:
+            require(pty.returncode != 0, "unrequested permit-pty was unexpectedly effective")
 
         denied_value = json.loads(allow_config)
         denied_value["accounts"] = {}
@@ -334,7 +448,43 @@ def main() -> int:
         require(offered_key.encode() not in disclosed, "OpenSSH diagnostics disclosed the offered carrier")
         certificate_blob = base64.b64decode(offered_key, validate=True)
         require(certificate_blob not in disclosed, "OpenSSH diagnostics disclosed raw certificate bytes")
-        print("real OpenSSH accepted fresh maximum-size GQ via production C++ verifier; denial remained closed")
+        if live:
+            require(evidence_output is not None, "live evidence output was not resolved")
+            report_path = artifact / "live-report.json"
+            require(report_path.is_file(), "live Go generator omitted its sanitized report")
+            report = validate_live_report(
+                json.loads(report_path.read_text(encoding="utf-8")), live_cell,
+            )
+            version_result = run([str(binary), "version"])
+            require(version_result.returncode == 0 and not version_result.stderr,
+                    "C++ verifier version query failed")
+            cpp_version = json.loads(version_result.stdout)
+            go_revision_result = run(["git", "rev-parse", "HEAD"], cwd=go_root)
+            require(go_revision_result.returncode == 0 and not go_revision_result.stderr,
+                    "Go revision query failed")
+            report.update({
+                "go_revision": go_revision_result.stdout.decode("ascii").strip(),
+                "cpp_version": cpp_version,
+                "cpp_binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+                "cpp_direct_verification_microseconds": direct_microseconds,
+                "cpp_direct_verified": True,
+                "openssh_verified": True,
+                "deny_all_verified": True,
+                "offered_carrier_disclosure_absent": True,
+                "certificate_sha256": hashlib.sha256(certificate_blob).hexdigest(),
+                "host": {
+                    "sysname": os.uname().sysname,
+                    "release": os.uname().release,
+                    "machine": os.uname().machine,
+                },
+            })
+            write_private(
+                evidence_output,
+                (json.dumps(report, indent=2, sort_keys=True) + "\n").encode(),
+            )
+            print(f"live workload cell {live_cell} passed Go/C++ direct and real OpenSSH gates")
+        else:
+            print("real OpenSSH accepted fresh maximum-size GQ via production C++ verifier; denial remained closed")
         return 0
     finally:
         stop(server)
