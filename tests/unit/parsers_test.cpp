@@ -368,10 +368,13 @@ void verify_jwks_file(std::string_view path, std::string_view kid,
                                  std::string(path)},
         credbind::jwks::FilePolicy{static_cast<std::uint32_t>(::geteuid())});
     if (expect_success) {
-        require(static_cast<bool>(loaded), "pinned static JWKS was rejected");
+        if (!loaded) {
+            throw std::runtime_error("pinned static JWKS was rejected: " +
+                                     loaded.error().message);
+        }
         require(loaded->size() == 1U, "pinned static JWKS has wrong key count");
         const auto key = loaded->resolve_rs256(kid);
-        require(key && key->exponent == 65537U && key->modulus.size() == 256U,
+        require(key && key->exponent == 65537U && key->modulus.size() >= 256U,
                 "pinned static JWKS key resolution failed");
         return;
     }
@@ -443,7 +446,7 @@ void verify_issuer_frame(const std::string& frame) {
     } else if (scenario == "required-one-of-pass") {
         policy.required_claims.push_back(credbind::issuer::Predicate{
             "sub", credbind::issuer::PredicateOperation::string_one_of, "",
-            {"fixture-subject-v1-rc3", "other"}});
+            {"fixture-subject-v1-rc4", "other"}});
     } else if (scenario == "required-array-contains-wrong") {
         policy.required_claims.push_back(credbind::issuer::Predicate{
             "aud", credbind::issuer::PredicateOperation::string_array_contains,
@@ -466,7 +469,7 @@ void verify_issuer_frame(const std::string& frame) {
     if (mode == 'P') {
         require(result && result->issuer == policy.issuer && !result->issuer_key_id.empty() &&
                     result->binding_profile == fields[1] && result->claims.size() == 3U &&
-                    result->claims.at("sub") == "fixture-subject-v1-rc3" &&
+                    result->claims.at("sub") == "fixture-subject-v1-rc4" &&
                     result->claims.at("iat").is_number_integer() &&
                     result->credential_valid_until_unix > verification_time &&
                     fields[11].size() == result->verified_evidence_digest.size() &&
@@ -652,11 +655,11 @@ void verify_direct_carrier_frame(const std::string& frame) {
     if (fields[15] == "@one-of") {
         predicates.push_back(credbind::issuer::Predicate{
             "sub", credbind::issuer::PredicateOperation::string_one_of, "",
-            {"other-subject", "fixture-subject-v1-rc3"}});
+            {"other-subject", "fixture-subject-v1-rc4"}});
     } else if (fields[15] == "@array-wrong-type") {
         predicates.push_back(credbind::issuer::Predicate{
             "sub", credbind::issuer::PredicateOperation::string_array_contains,
-            "fixture-subject-v1-rc3", {}});
+            "fixture-subject-v1-rc4", {}});
     } else if (!fields[15].empty() && fields[15] != "@split-rules") {
         predicates.push_back(credbind::issuer::Predicate{
             std::string(fields[15]), credbind::issuer::PredicateOperation::string_equals,
@@ -671,7 +674,7 @@ void verify_direct_carrier_frame(const std::string& frame) {
             std::string(fields[14]),
             {credbind::issuer::Predicate{
                 "sub", credbind::issuer::PredicateOperation::string_equals,
-                "fixture-subject-v1-rc3", {}}},
+                "fixture-subject-v1-rc4", {}}},
             {"permit-pty"}});
         accounts[std::string(fields[2])].push_back(credbind::direct::AccountRule{
             std::string(fields[14]),

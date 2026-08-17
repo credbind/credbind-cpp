@@ -18,8 +18,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CORPUS = (
-    ROOT / ".cache" / "conformance" / "v1.0.0-rc.3" / "corpus"
-    / "credbind-ssh-v1-conformance-v1.0.0-rc.3"
+    ROOT / ".cache" / "conformance" / "v1.0.0-rc.4" / "corpus"
+    / "credbind-ssh-v1-conformance-v1.0.0-rc.4"
 )
 
 
@@ -161,7 +161,7 @@ def direct_carrier_frame(
     allowed_extensions: str = "permit-port-forwarding,permit-pty",
     account_issuer: str | None = None,
     account_claim: str = "sub",
-    account_value: str = "fixture-subject-v1-rc3",
+    account_value: str = "fixture-subject-v1-rc4",
     maximum_identity_lifetime: int = 0,
     clock_skew: int = 30,
 ) -> bytes:
@@ -556,7 +556,7 @@ def main() -> None:
                 "account_rule": {
                     "issuer": external_token["authenticated_issuer"],
                     "claim": "sub",
-                    "value": "fixture-subject-v1-rc3",
+                    "value": "fixture-subject-v1-rc4",
                     "allowed_certificate_extensions": [
                         "permit-port-forwarding", "permit-pty"
                     ],
@@ -739,7 +739,7 @@ def main() -> None:
                 b"s", signing_input, signature_bytes, modulus, (3).to_bytes(4, "big")
             ),
         )
-        undersized = (int.from_bytes(modulus, "big") >> 1024).to_bytes(128, "big")
+        undersized = modulus[:128]
         run_crypto(
             args.binary,
             temporary,

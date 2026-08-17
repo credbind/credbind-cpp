@@ -3,7 +3,7 @@
 This repository will contain the independently designed, offline C++17
 `credbind-ssh-authorized-keys` verifier for CredBind SSH v1.
 
-The repository pins the immutable `v1.0.0-rc.3` language-neutral conformance
+The repository pins the immutable `v1.0.0-rc.4` language-neutral conformance
 input. The implementation order and acceptance requirements are owned by the
 [C++ rewrite plan](https://github.com/credbind/planning/blob/main/rewrite/languages/cpp.md).
 

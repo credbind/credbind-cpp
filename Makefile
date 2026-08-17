@@ -116,15 +116,15 @@ test-integration: test-integration-adapters
 
 test-syslog-adapters: fixtures $(ADAPTER_TEST_BINARY)
 	$(ADAPTER_TEST_BINARY) "$(CURDIR)/tests/fixtures/issuer-jwks.json" \
-		"$(CURDIR)/.cache/conformance/v1.0.0-rc.3/corpus/credbind-ssh-v1-conformance-v1.0.0-rc.3/vectors/ssh-carrier-p256.json" \
-		"$(CURDIR)/.cache/conformance/v1.0.0-rc.3/corpus/credbind-ssh-v1-conformance-v1.0.0-rc.3/keys/issuer-jwks.json"
+		"$(CURDIR)/.cache/conformance/v1.0.0-rc.4/corpus/credbind-ssh-v1-conformance-v1.0.0-rc.4/vectors/ssh-carrier-p256.json" \
+		"$(CURDIR)/.cache/conformance/v1.0.0-rc.4/corpus/credbind-ssh-v1-conformance-v1.0.0-rc.4/keys/issuer-jwks.json"
 
 test-syslog: test-syslog-adapters
 
 test-deadline: fixtures $(ADAPTER_TEST_BINARY)
 	$(ADAPTER_TEST_BINARY) "$(CURDIR)/tests/fixtures/issuer-jwks.json" \
-		"$(CURDIR)/.cache/conformance/v1.0.0-rc.3/corpus/credbind-ssh-v1-conformance-v1.0.0-rc.3/vectors/ssh-carrier-p256.json" \
-		"$(CURDIR)/.cache/conformance/v1.0.0-rc.3/corpus/credbind-ssh-v1-conformance-v1.0.0-rc.3/keys/issuer-jwks.json"
+		"$(CURDIR)/.cache/conformance/v1.0.0-rc.4/corpus/credbind-ssh-v1-conformance-v1.0.0-rc.4/vectors/ssh-carrier-p256.json" \
+		"$(CURDIR)/.cache/conformance/v1.0.0-rc.4/corpus/credbind-ssh-v1-conformance-v1.0.0-rc.4/keys/issuer-jwks.json"
 
 $(SANITIZE_TEST_BINARY): tests/unit/parsers_test.cpp src/base64url.cpp src/base64url.hpp src/crypto.cpp src/crypto.hpp src/direct_verifier.cpp src/direct_verifier.hpp src/issuer_verifier.cpp src/issuer_verifier.hpp src/jwks.cpp src/jwks.hpp src/jws.cpp src/jws.hpp src/openssh_certificate.cpp src/openssh_certificate.hpp src/strict_json.cpp src/strict_json.hpp src/parse_error.hpp $(THIRD_PARTY_HEADERS) Makefile
 	@mkdir -p $(@D)
@@ -137,8 +137,8 @@ $(SANITIZE_ADAPTER_TEST_BINARY): tests/unit/adapters_test.cpp src/command.hpp sr
 test-sanitize: dependencies-check crypto-check fixtures $(SANITIZE_TEST_BINARY) $(SANITIZE_ADAPTER_TEST_BINARY)
 	$(SANITIZER_ENV) $(SANITIZE_TEST_BINARY)
 	$(SANITIZER_ENV) $(SANITIZE_ADAPTER_TEST_BINARY) "$(CURDIR)/tests/fixtures/issuer-jwks.json" \
-		"$(CURDIR)/.cache/conformance/v1.0.0-rc.3/corpus/credbind-ssh-v1-conformance-v1.0.0-rc.3/vectors/ssh-carrier-p256.json" \
-		"$(CURDIR)/.cache/conformance/v1.0.0-rc.3/corpus/credbind-ssh-v1-conformance-v1.0.0-rc.3/keys/issuer-jwks.json"
+		"$(CURDIR)/.cache/conformance/v1.0.0-rc.4/corpus/credbind-ssh-v1-conformance-v1.0.0-rc.4/vectors/ssh-carrier-p256.json" \
+		"$(CURDIR)/.cache/conformance/v1.0.0-rc.4/corpus/credbind-ssh-v1-conformance-v1.0.0-rc.4/keys/issuer-jwks.json"
 	$(SANITIZER_ENV) $(PYTHON) tests/fixtures/parser_vectors_test.py "$(SANITIZE_TEST_BINARY)"
 	$(SANITIZER_ENV) $(PYTHON) tests/conformance/shared_cases_test.py \
 		"$(SANITIZE_TEST_BINARY)" "$(SANITIZE_ADAPTER_TEST_BINARY)"

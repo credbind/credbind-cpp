@@ -19,8 +19,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 CORPUS = (
-    ROOT / ".cache/conformance/v1.0.0-rc.3/corpus"
-    / "credbind-ssh-v1-conformance-v1.0.0-rc.3"
+    ROOT / ".cache/conformance/v1.0.0-rc.4/corpus"
+    / "credbind-ssh-v1-conformance-v1.0.0-rc.4"
 )
 
 
@@ -453,13 +453,13 @@ def main() -> None:
     dispositioned = len(results) - applicable
     report = {
         "artifact_sha256": hashlib.sha256(
-            (ROOT / ".cache/conformance/v1.0.0-rc.3/credbind-ssh-v1-conformance-v1.0.0-rc.3.tar.gz").read_bytes()
+            (ROOT / ".cache/conformance/v1.0.0-rc.4/credbind-ssh-v1-conformance-v1.0.0-rc.4.tar.gz").read_bytes()
         ).hexdigest(),
         "manifest_sha256": hashlib.sha256(
             (CORPUS / "MANIFEST.json").read_bytes()
         ).hexdigest(),
         "implementation": "cpp",
-        "release": "v1.0.0-rc.3",
+        "release": "v1.0.0-rc.4",
         "cases": results,
         "summary": {"applicable": applicable, "dispositioned": dispositioned, "total": 78},
         "status": "cpp-applicable-observables-verified",
