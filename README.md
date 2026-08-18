@@ -195,10 +195,10 @@ reuses the production typed parser, including offline static-JWKS validation.
 failures.
 
 The command root and every implemented subcommand support both `-h` and
-`--help`. Help exits successfully, writes only its stable usage text to stdout,
-and is handled before configuration access, verification, clock use or audit
-emission. Go and C++ emit byte-identical help for their shared
-`credbind-ssh-authorized-keys` surface.
+`--help`. Help exits successfully, writes its implementation-owned usage text
+to stdout, and is handled before configuration access, verification, clock use
+or audit emission. Tests cover commands and options semantically; help
+presentation is not a cross-language byte contract.
 
 ## Sanitizer and fuzz gates
 
